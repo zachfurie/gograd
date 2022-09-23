@@ -20,7 +20,7 @@ type tensor struct {
 
 func ones(l int) tensor {
 	zero_grad_data := make([]float32, l)
-	for i, _ := range zero_grad_data {
+	for i := range zero_grad_data {
 		zero_grad_data[i] = 1
 	}
 	return tensor{zero_grad_data}
@@ -56,7 +56,7 @@ func forward(root *node) *tensor {
 			t1 := forward(root.left)
 			t2 := forward(root.right)
 			data := make([]float32, len(t1.data))
-			for i, _ := range data {
+			for i := range data {
 				data[i] = t1.data[i] + t2.data[i]
 			}
 			root.tensor.data = data
@@ -66,7 +66,7 @@ func forward(root *node) *tensor {
 			t1 := forward(root.left)
 			t2 := forward(root.right)
 			data := make([]float32, len(t1.data))
-			for i, _ := range data {
+			for i := range data {
 				data[i] = t1.data[i] * t2.data[i]
 			}
 			root.tensor.data = data
