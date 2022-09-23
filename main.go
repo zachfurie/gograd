@@ -2,7 +2,8 @@ package main
 
 import (
 	"fmt"
-	gograd_1d "gograd/gograd_1d"
+
+	gograd_1d "github.com/zachfurie/gograd/gograd_1d"
 )
 
 func main() {
