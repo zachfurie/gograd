@@ -120,18 +120,11 @@ func intermediary(tens *[]float32, node1 *node) *node {
 
 // COMPLEX OPS:
 
-// matmul(a,x) -> a = l2xl matrix, x = l vector
+// matmul(a,x) -> a = [l2 x l] matrix, x = [l] vector
 func matmul(a *node, x *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
-	prev := nil
-	for i := 0; i < l2; i++ {
-		layer := intermediary(a.tensor.data[i], a)
-		prev_layer := node{layer, x, "*", &data, &zero_grad, l2, l}
-		// sum layer.tensor.data
-	}
-	new_node := node{node1, node2, "mm", &data, &zero_grad, l2, l}
-
+	new_node := node{a, x, "mm", &data, &zero_grad, l2, l}
 	return &new_node
 }
 
@@ -171,6 +164,20 @@ func forward(root *node) *tensor {
 				}
 			}
 			return root.tensor
+		} else if root.op == "mm" {
+			a := forward(root.left)
+			x := forward(root.right)
+			x_layer := *x.data[0]
+			data := zeros(1, root.l)
+			data_layer := *data.data[0]
+			for i := 0; i < root.l2; i++ {
+				a_layer := *a.data[i]
+				for j := 0; j < root.l; j++ {
+					data_layer[i] += a_layer[j] * x_layer[j]
+				}
+				root.tensor = &data
+			}
+			return root.tensor
 		}
 	}
 	return nil
@@ -186,19 +193,47 @@ func backward(root *node) {
 			root.right.grad = root.grad
 		} else if root.op == "*" {
 			// Chain rule for a * b
-			data1 := make([]float32, len(root.right.grad.data))
-			for i := range data1 {
-				data1[i] = root.right.tensor.data[i] * root.grad.data[i]
+			data1 := zeros(root.l2, root.l)
+			for i := 0; i < root.l2; i++ {
+				data_layer := *data1.data[i]
+				right_layer := *root.right.tensor.data[i]
+				grad_layer := *root.grad.data[i]
+				for j := 0; j < root.l; j++ {
+					data_layer[j] = right_layer[j] * grad_layer[j]
+				}
 			}
-			ret1 := tensor{data1}
-			root.left.grad = &ret1
+			root.left.grad = &data1
 
-			data2 := make([]float32, len(root.left.grad.data))
-			for i := range data2 {
-				data2[i] = root.left.tensor.data[i] * root.grad.data[i]
+			data2 := zeros(root.l2, root.l)
+			for i := 0; i < root.l2; i++ {
+				data_layer := *data2.data[i]
+				left_layer := *root.left.tensor.data[i]
+				grad_layer := *root.grad.data[i]
+				for j := 0; j < root.l; j++ {
+					data_layer[j] = left_layer[j] * grad_layer[j]
+				}
 			}
-			ret2 := tensor{data2}
-			root.right.grad = &ret2
+			root.right.grad = &data2
+		} else if root.op == "mm" {
+			// gradient should be 1 x l -> l2 x l
+			// a = root.left
+			// x = root.right
+			right_layer := *root.right.grad.data[0]
+			for x := range right_layer {
+				right_layer[x] = 0
+			}
+			root_grad := *root.grad.data[0]
+			for i := 0; i < root.l2; i++ {
+				left_layer := *root.left.grad.data[i]
+
+				right_data := *root.right.tensor.data[0]
+				for j := 0; j < root.l; j++ {
+					left_data := *root.left.tensor.data[j]
+					left_layer[j] = right_data[j] * root_grad[i]
+					right_layer[i] += left_data[i] * root_grad[i]
+
+				}
+			}
 		}
 		backward(root.left)
 		backward(root.right)
@@ -213,57 +248,51 @@ func backward(root *node) {
 // }
 
 func Run() {
-	x := tensor{[]float32{0., 1., 2.}}
-	a := tensor{[]float32{5., 5., 5.}}
-	b := tensor{[]float32{3., 2., 1.}}
-	a2 := tensor{[]float32{5., 5., 5.}}
-	b2 := tensor{[]float32{3., 2., 1.}}
+	x_0 := []float32{2., 2., 4.}
+	x := tensor{[]*[]float32{&x_0}, 1, 3}
+	a_0 := []float32{1., 2., 3.}
+	a_1 := []float32{4., 5., 6.}
+	a_2 := []float32{7., 8., 9.}
+	a := tensor{[]*[]float32{&a_0, &a_1, &a_2}, 3, 3}
+	b_0 := []float32{3., 2., 1.}
+	b := tensor{[]*[]float32{&b_0}, 1, 3}
 	x_l := leaf(&x)
 	a_l := leaf(&a)
 	b_l := leaf(&b)
-	a2_l := leaf(&a2)
-	b2_l := leaf(&b2)
 	comp_lookup := map[string]*node{}
-	a_x := mul(x_l, a_l, x_l.length)
-	ax_b := add(a_x, b_l, b_l.length)
-	comp_graph := add(mul(ax_b, a2_l, a2_l.length), b2_l, b2_l.length)
+	a_x := matmul(a_l, x_l, 3, 3)
+	comp_graph := add(a_x, b_l, 1, 3)
+	// comp_graph := matmul(a_l, x_l, 3, 3)
 	comp_lookup["x"] = x_l
 	comp_lookup["a"] = a_l
 	comp_lookup["b"] = b_l
-	comp_lookup["a2"] = a2_l
-	comp_lookup["b2"] = b2_l
-	comp_lookup["mul"] = a_x
-	comp_lookup["add"] = ax_b
+	// comp_lookup["mul"] = a_x
+	// comp_lookup["add"] = comp_graph
 
 	fmt.Println("Layers: ")
-	fmt.Println("linear 1 = ax + b")
-	fmt.Println("linear 2 = a(linear 1) + b")
+	fmt.Println("Linear 1 = Ax + b")
 	fmt.Println("")
 	fmt.Println("Inputs:")
-	fmt.Println("x: ", x.data)
-	fmt.Println("a: ", a.data)
-	fmt.Println("b: ", b.data)
+	fmt.Println("x: ", *x.data[0])
+	fmt.Println("A: ")
+	for i := 0; i < 3; i++ {
+		fmt.Println(*a.data[i])
+	}
+	fmt.Println("b: ", *b.data[0])
 	fmt.Println("")
 	fmt.Println("Output:")
-	fmt.Println("linear 2 = ", forward(comp_graph).data)
+	fmt.Println("linear 2 = ", *forward(comp_graph).data[0])
 	backward(comp_graph)
 	fmt.Println("")
 	fmt.Println("Gradients: ")
 	// fmt.Println("add: ", comp_lookup["add"].grad.data)
 	// fmt.Println("mul: ", comp_lookup["mul"].grad.data)
-	fmt.Println("x: ", comp_lookup["x"].grad.data)
-	a_grad := ones(len(comp_lookup["a"].grad.data))
-	for i := range a_grad.data {
-		a_grad.data[i] = comp_lookup["a"].grad.data[i] + comp_lookup["a2"].grad.data[i]
+	x_grad := *comp_lookup["x"].grad.data[0]
+	fmt.Println("x: ", x_grad)
+	fmt.Println("A: ")
+	for i := 0; i < 3; i++ {
+		fmt.Println(*comp_lookup["a"].grad.data[i])
 	}
-	b_grad := ones(len(comp_lookup["b"].grad.data))
-	for i := range b_grad.data {
-		b_grad.data[i] = comp_lookup["b"].grad.data[i] + comp_lookup["b2"].grad.data[i]
-	}
-	fmt.Println("a: ", a_grad.data)
-	fmt.Println("b: ", b_grad.data)
-	// fmt.Println("a1: ", comp_lookup["a"].grad.data)
-	// fmt.Println("b1: ", comp_lookup["b"].grad.data)
-	// fmt.Println("a2: ", comp_lookup["a2"].grad.data)
-	// fmt.Println("b2: ", comp_lookup["b2"].grad.data)
+	b_grad := *comp_lookup["b"].grad.data[0]
+	fmt.Println("b: ", b_grad)
 }
