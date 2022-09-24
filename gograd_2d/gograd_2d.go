@@ -1,4 +1,4 @@
-package gograd_1d
+package gograd_2d
 
 import "fmt"
 
@@ -9,44 +9,138 @@ type node struct {
 	op     string
 	tensor *tensor
 	grad   *tensor
-	length int
+	l2     int
+	l      int
 }
 
+// 2d tensor
 type tensor struct {
+	data []*[]float32
+	l2   int
+	l    int
+	// grad bool
+}
+
+type tensor1d struct {
 	data []float32
 	// grad bool
 }
 
+type tensornd struct {
+	data     []*tensornd
+	last_dim *[]float32
+	// for all except last dimension, last_dim is nil
+	// see shape() for more info
+}
+
 // Utilities:
-func ones(l int) tensor {
-	zero_grad_data := make([]float32, l)
-	for i := range zero_grad_data {
-		zero_grad_data[i] = 1
+
+// Returns a 2d tensor of size (l2,l)
+func zeros(l2 int, l int) tensor {
+	zero_grad_pts := make([]*[]float32, l2)
+	for i := range zero_grad_pts {
+		zero_grad_data := make([]float32, l)
+		for j := range zero_grad_data {
+			zero_grad_data[j] = 0
+		}
+		zero_grad_pts[i] = &zero_grad_data
 	}
-	return tensor{zero_grad_data}
+	return tensor{zero_grad_pts, l2, l}
+}
+
+// Returns a 2d tensor of size (l2,l)
+func ones(l2 int, l int) tensor {
+	zero_grad_pts := make([]*[]float32, l2)
+	for i := range zero_grad_pts {
+		zero_grad_data := make([]float32, l)
+		for j := range zero_grad_data {
+			zero_grad_data[j] = 1
+		}
+		zero_grad_pts[i] = &zero_grad_data
+	}
+	return tensor{zero_grad_pts, l2, l}
+}
+
+// Returns shape of tensor t
+func shape(t *tensornd) []int {
+	root := t
+	num_dims := 1
+	for root.last_dim == nil {
+		num_dims += 1
+		root = root.data[0]
+	}
+	shape_ret := make([]int, num_dims)
+	root = t
+	i := 0
+	for root.last_dim == nil {
+		shape_ret[i] = len(root.data)
+		root = root.data[0]
+	}
+	shape_ret[num_dims-1] = len(*root.last_dim)
+	return shape_ret
 }
 
 // BASIC OPS:
 func leaf(tens *tensor) *node {
-	zero_grad := ones(len(tens.data))
-	new_node := node{nil, nil, "leaf", tens, &zero_grad, len(tens.data)}
-	return &new_node
-}
-func add(node1 *node, node2 *node, l int) *node {
-	zero_grad := ones(l)
-	new_node := node{node1, node2, "+", &tensor{[]float32{}}, &zero_grad, l}
-
+	zero_grad := ones(tens.l2, tens.l)
+	new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
 	return &new_node
 }
 
-func mul(node1 *node, node2 *node, l int) *node {
-	zero_grad := ones(l)
-	new_node := node{node1, node2, "*", &tensor{[]float32{}}, &zero_grad, l}
+//	func coef(tens *tensor) *node {
+//		zero_grad := ones(tens.l2, tens.l)
+//		new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
+//		return &new_node
+//	}
+//
+//	func input(tens *tensor) *node {
+//		zero_grad := ones(tens.l2, tens.l)
+//		new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
+//		return &new_node
+//	}
+func add(node1 *node, node2 *node, l2 int, l int) *node {
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
+	new_node := node{node1, node2, "+", &data, &zero_grad, l2, l}
+	return &new_node
+}
+
+func mul(node1 *node, node2 *node, l2 int, l int) *node {
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
+	new_node := node{node1, node2, "*", &data, &zero_grad, l2, l}
+	return &new_node
+}
+
+func intermediary(tens *[]float32, node1 *node) *node {
+	tens2 := tensor{[]*[]float32{tens}, 1, node1.l}
+	new_node := node{node1, nil, "inter", &tens2, node1.grad, node1.l2, node1.l}
+	return &new_node
+}
+
+// COMPLEX OPS:
+
+// matmul(a,x) -> a = l2xl matrix, x = l vector
+func matmul(a *node, x *node, l2 int, l int) *node {
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
+	prev := nil
+	for i := 0; i < l2; i++ {
+		layer := intermediary(a.tensor.data[i], a)
+		prev_layer := node{layer, x, "*", &data, &zero_grad, l2, l}
+		// sum layer.tensor.data
+	}
+	new_node := node{node1, node2, "mm", &data, &zero_grad, l2, l}
 
 	return &new_node
+}
+
+func relu() {
+	return
 }
 
 // ML OPS:
+
 func forward(root *node) *tensor {
 	if root.left == nil {
 		return root.tensor
@@ -55,21 +149,27 @@ func forward(root *node) *tensor {
 			// Return tensor a + b
 			t1 := forward(root.left)
 			t2 := forward(root.right)
-			data := make([]float32, len(t1.data))
-			for i := range data {
-				data[i] = t1.data[i] + t2.data[i]
+			for i := range root.tensor.data {
+				t0d := *root.tensor.data[i]
+				t1d := *t1.data[i]
+				t2d := *t2.data[i]
+				for j := range t0d {
+					t0d[j] = t1d[j] + t2d[j]
+				}
 			}
-			root.tensor.data = data
 			return root.tensor
 		} else if root.op == "*" {
 			// Return tensor a * b
 			t1 := forward(root.left)
 			t2 := forward(root.right)
-			data := make([]float32, len(t1.data))
-			for i := range data {
-				data[i] = t1.data[i] * t2.data[i]
+			for i := range root.tensor.data {
+				t0d := *root.tensor.data[i]
+				t1d := *t1.data[i]
+				t2d := *t2.data[i]
+				for j := range t0d {
+					t0d[j] = t1d[j] * t2d[j]
+				}
 			}
-			root.tensor.data = data
 			return root.tensor
 		}
 	}
