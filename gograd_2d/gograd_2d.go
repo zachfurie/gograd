@@ -119,7 +119,7 @@ func mul(node1 *node, node2 *node, l2 int, l int) *node {
 // matmul(A,x) -> A = [l2 x l] matrix, x = [l] vector
 func matmul(a *node, x *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
-	data := zeros(l2, l)
+	data := zeros(1, l)
 	new_node := node{a, x, "mm", &data, &zero_grad, l2, l}
 	return &new_node
 }
@@ -157,6 +157,7 @@ func forward(root *node) *tensor {
 		// Return tensor a + b
 		t1 := forward(root.left)
 		t2 := forward(root.right)
+		print(t1.data, t2.data)
 		for i := range root.tensor.data {
 			t0d := *root.tensor.data[i]
 			t1d := *t1.data[i]
@@ -192,10 +193,10 @@ func forward(root *node) *tensor {
 		}
 	} else if root.op == "relu" {
 		a := forward(root.left)
-		for i := 0; i < root.l2; i++ {
+		for i := 0; i < a.l2; i++ {
 			a_layer := *a.data[i]
 			data_layer := *root.tensor.data[i]
-			for j := 0; j < root.l; j++ {
+			for j := 0; j < a.l; j++ {
 				if a_layer[j] < 0 {
 					data_layer[j] = 0
 				} else {
@@ -288,7 +289,6 @@ func backward(root *node) {
 				left_data := *root.left.tensor.data[j]
 				left_layer[j] = right_data[j] * root_grad[i]
 				right_layer[i] += left_data[i] * root_grad[i]
-
 			}
 		}
 		backward(root.left)
@@ -314,32 +314,32 @@ func backward(root *node) {
 
 // Proxy for main() so I can do test runs
 func Run() {
-	x_0 := []float32{2., -2., 4.}
-	x := tensor{[]*[]float32{&x_0}, 1, 3}
-	a_0 := []float32{1., -2., 3.}
-	a_1 := []float32{-4., 5., 6.}
-	a_2 := []float32{7., -8., -9.}
-	a := tensor{[]*[]float32{&a_0, &a_1, &a_2}, 3, 3}
-	b_0 := []float32{3., 2., 1.}
-	b := tensor{[]*[]float32{&b_0}, 1, 3}
+	x_0 := []float32{2., -2., 4., 2., -2., 4.}
+	x := tensor{[]*[]float32{&x_0}, 1, 6}
+	a_0 := []float32{1., -2., 3., 1., -2., 3.}
+	a_1 := []float32{-4., 5., 6., -4., 5., 6.}
+	a_2 := []float32{7., -8., -9., 7., -8., -9.}
+	a_3 := []float32{1., -2., 3., 1., -2., 3.}
+	a_4 := []float32{-4., 5., 6., -4., 5., 6.}
+	a_5 := []float32{7., -8., -9., 7., -8., -9.}
+	a := tensor{[]*[]float32{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
+	b_0 := []float32{3., 2., 1., 3., 2., 1.}
+	b := tensor{[]*[]float32{&b_0}, 1, 6}
 	x_l := leaf(&x)
 	a_l := leaf(&a)
 	b_l := leaf(&b)
 	comp_lookup := map[string]*node{}
-	a_x := matmul(a_l, x_l, 3, 3)
-	drop := dropout(a_x, 1, a_x.l, 0.3)
-	rel := relu(drop, drop.l2, drop.l)
+	drop := dropout(a_l, a_l.l2, a_l.l, 0.4)
+	a_x := matmul(drop, x_l, 6, 6)
+	rel := relu(a_x, a_x.tensor.l2, a_x.tensor.l)
 	comp_graph := add(rel, b_l, rel.l2, rel.l)
 	comp_lookup["x"] = x_l
 	comp_lookup["a"] = a_l
 	comp_lookup["b"] = b_l
-	fmt.Println("Layers: ")
-	fmt.Println("Linear 1 = Ax + b")
-	fmt.Println("")
 	fmt.Println("Inputs:")
 	fmt.Println("x: ", *x.data[0])
 	fmt.Println("A: ")
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 6; i++ {
 		fmt.Println(*a.data[i])
 	}
 	fmt.Println("b: ", *b.data[0])
@@ -354,7 +354,7 @@ func Run() {
 	x_grad := *comp_lookup["x"].grad.data[0]
 	fmt.Println("x: ", x_grad)
 	fmt.Println("A: ")
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 6; i++ {
 		fmt.Println(*comp_lookup["a"].grad.data[i])
 	}
 	b_grad := *comp_lookup["b"].grad.data[0]
