@@ -1,8 +1,13 @@
 package gograd_2d
 
-import "fmt"
+import (
+	"fmt"
+	"math/rand"
+)
 
-// Comp graph structs:
+//  ----------------------------------- Data Structures:  -----------------------------------
+
+// Comp Graph Node
 type node struct {
 	left   *node
 	right  *node
@@ -21,11 +26,13 @@ type tensor struct {
 	// grad bool
 }
 
+// 1d tensor (DEPRECIATED)
 type tensor1d struct {
 	data []float32
 	// grad bool
 }
 
+// nd tensor (will eventually only use this tensor struct)
 type tensornd struct {
 	data     []*tensornd
 	last_dim *[]float32
@@ -33,7 +40,7 @@ type tensornd struct {
 	// see shape() for more info
 }
 
-// Auxiliary Functions:
+//  ----------------------------------- Auxiliary Functions:  -----------------------------------
 
 // Returns a 2d tensor of size (l2,l)
 func zeros(l2 int, l int) tensor {
@@ -80,7 +87,8 @@ func shape(t *tensornd) []int {
 	return shape_ret
 }
 
-// BASIC OPS:
+//  ----------------------------------- BASIC OPS:  -----------------------------------
+
 func leaf(tens *tensor) *node {
 	zero_grad := ones(tens.l2, tens.l)
 	new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
@@ -101,15 +109,15 @@ func mul(node1 *node, node2 *node, l2 int, l int) *node {
 	return &new_node
 }
 
-// COMPLEX OPS:
-
-// matmul(a,x) -> a = [l2 x l] matrix, x = [l] vector
+// matmul(A,x) -> A = [l2 x l] matrix, x = [l] vector
 func matmul(a *node, x *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
 	new_node := node{a, x, "mm", &data, &zero_grad, l2, l}
 	return &new_node
 }
+
+//  ----------------------------------- ML OPS:  -----------------------------------
 
 func relu(a *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
@@ -118,7 +126,24 @@ func relu(a *node, l2 int, l int) *node {
 	return &new_node
 }
 
-// ML OPS:
+func dropout(a *node, l2 int, l int, drop_prob float32) *node {
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
+	drop_prob_data := []float32{drop_prob}
+	drop_prob_tensor := tensor{[]*[]float32{&drop_prob_data}, 1, l}
+	// drop_prob_tensor := tensornd{last_dim: &drop_prob_data}
+	drop_prob_input := leaf(&drop_prob_tensor)
+	new_node := node{a, drop_prob_input, "do", &data, &zero_grad, l2, l}
+	return &new_node
+}
+
+// func linear(in *node, weight *node, bias *node) *node {
+// 	in_times_weight := node{in, weight, "*"}
+// 	plus_bias := node{&in_times_weight, bias, "+"}
+// 	return &plus_bias
+// }
+
+// ----------------------------------- FORWARD AND BACKWARD:  -----------------------------------
 
 func forward(root *node) *tensor {
 	if root.left == nil {
@@ -177,6 +202,22 @@ func forward(root *node) *tensor {
 			}
 		}
 		return root.tensor
+	} else if root.op == "do" {
+		a := forward(root.left)
+		for i := 0; i < root.l2; i++ {
+			a_layer := *a.data[i]
+			data_layer := *root.tensor.data[i]
+			drop_prob := *root.right.tensor.data[0]
+			drop_prob_float := drop_prob[0]
+			for j := 0; j < root.l; j++ {
+				if rand.Float32() < drop_prob_float {
+					data_layer[j] = 0
+				} else {
+					data_layer[j] = a_layer[j] / (1 - drop_prob_float) // inverted dropout scaling -> x/(1-p)
+				}
+			}
+		}
+		return root.tensor
 	}
 	return nil
 }
@@ -184,11 +225,11 @@ func forward(root *node) *tensor {
 func backward(root *node) {
 	if root.left == nil {
 		return
-	} else if root.op == "+" {
+	} else if root.op == "+" { // add()
 		// Chain rule for a + b
 		root.left.grad = root.grad
 		root.right.grad = root.grad
-	} else if root.op == "*" {
+	} else if root.op == "*" { // mul()
 		// Chain rule for a * b
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
@@ -211,7 +252,7 @@ func backward(root *node) {
 			}
 		}
 		root.right.grad = &data2
-	} else if root.op == "mm" {
+	} else if root.op == "mm" { // matmul()
 		// gradient should be 1 x l -> l2 x l
 		// a = root.left
 		// x = root.right
@@ -231,7 +272,7 @@ func backward(root *node) {
 
 			}
 		}
-	} else if root.op == "relu" {
+	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
 			data_layer := *data1.data[i]
@@ -248,13 +289,6 @@ func backward(root *node) {
 	backward(root.left)
 	backward(root.right)
 }
-
-// Layers:
-// func linear(in *node, weight *node, bias *node) *node {
-// 	in_times_weight := node{in, weight, "*"}
-// 	plus_bias := node{&in_times_weight, bias, "+"}
-// 	return &plus_bias
-// }
 
 // Proxy for main() so I can do test runs
 func Run() {
