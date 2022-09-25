@@ -5,6 +5,13 @@ import (
 	"math/rand"
 )
 
+// ----------------------------------- Notes: -----------------------------------
+
+// If all nodes are passing a tensor to next node during forward pass,
+// prob don't need to have weights as inputs to OP funcs.
+
+// Need to refactor code to use tensornd structs instead of tensor structs.
+
 //  ----------------------------------- Data Structures:  -----------------------------------
 
 // Comp Graph Node
@@ -127,12 +134,12 @@ func relu(a *node, l2 int, l int) *node {
 }
 
 func dropout(a *node, l2 int, l int, drop_prob float32) *node {
-	zero_grad := ones(l2, l)
-	data := zeros(l2, l)
 	drop_prob_data := []float32{drop_prob}
 	drop_prob_tensor := tensor{[]*[]float32{&drop_prob_data}, 1, l}
 	// drop_prob_tensor := tensornd{last_dim: &drop_prob_data}
 	drop_prob_input := leaf(&drop_prob_tensor)
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
 	new_node := node{a, drop_prob_input, "do", &data, &zero_grad, l2, l}
 	return &new_node
 }
@@ -146,9 +153,7 @@ func dropout(a *node, l2 int, l int, drop_prob float32) *node {
 // ----------------------------------- FORWARD AND BACKWARD:  -----------------------------------
 
 func forward(root *node) *tensor {
-	if root.left == nil {
-		return root.tensor
-	} else if root.op == "+" {
+	if root.op == "+" {
 		// Return tensor a + b
 		t1 := forward(root.left)
 		t2 := forward(root.right)
@@ -160,7 +165,6 @@ func forward(root *node) *tensor {
 				t0d[j] = t1d[j] + t2d[j]
 			}
 		}
-		return root.tensor
 	} else if root.op == "*" {
 		// Return tensor a * b
 		t1 := forward(root.left)
@@ -173,7 +177,6 @@ func forward(root *node) *tensor {
 				t0d[j] = t1d[j] * t2d[j]
 			}
 		}
-		return root.tensor
 	} else if root.op == "mm" {
 		a := forward(root.left)
 		x := forward(root.right)
@@ -187,7 +190,6 @@ func forward(root *node) *tensor {
 			}
 			root.tensor = &data
 		}
-		return root.tensor
 	} else if root.op == "relu" {
 		a := forward(root.left)
 		for i := 0; i < root.l2; i++ {
@@ -201,15 +203,14 @@ func forward(root *node) *tensor {
 				}
 			}
 		}
-		return root.tensor
 	} else if root.op == "do" {
 		a := forward(root.left)
-		for i := 0; i < root.l2; i++ {
+		for i := 0; i < a.l2; i++ {
 			a_layer := *a.data[i]
 			data_layer := *root.tensor.data[i]
 			drop_prob := *root.right.tensor.data[0]
 			drop_prob_float := drop_prob[0]
-			for j := 0; j < root.l; j++ {
+			for j := 0; j < a.l; j++ {
 				if rand.Float32() < drop_prob_float {
 					data_layer[j] = 0
 				} else {
@@ -217,18 +218,35 @@ func forward(root *node) *tensor {
 				}
 			}
 		}
-		return root.tensor
 	}
-	return nil
+	fmt.Println("------------- ", root.op, " -------------")
+	if root.left != nil {
+		fmt.Println("input 1:")
+		for i := range root.left.tensor.data {
+			fmt.Println(*root.left.tensor.data[i])
+		}
+	}
+	if root.right != nil {
+		fmt.Println("input 2:")
+		for i := range root.right.tensor.data {
+			fmt.Println(*root.right.tensor.data[i])
+		}
+	}
+	fmt.Println("result:")
+	for i := range root.tensor.data {
+		fmt.Println(*root.tensor.data[i])
+	}
+	fmt.Println("")
+	return root.tensor
 }
 
 func backward(root *node) {
-	if root.left == nil {
-		return
-	} else if root.op == "+" { // add()
+	if root.op == "+" { // add()
 		// Chain rule for a + b
 		root.left.grad = root.grad
 		root.right.grad = root.grad
+		backward(root.left)
+		backward(root.right)
 	} else if root.op == "*" { // mul()
 		// Chain rule for a * b
 		data1 := zeros(root.l2, root.l)
@@ -252,6 +270,8 @@ func backward(root *node) {
 			}
 		}
 		root.right.grad = &data2
+		backward(root.left)
+		backward(root.right)
 	} else if root.op == "mm" { // matmul()
 		// gradient should be 1 x l -> l2 x l
 		// a = root.left
@@ -263,7 +283,6 @@ func backward(root *node) {
 		root_grad := *root.grad.data[0]
 		for i := 0; i < root.l2; i++ {
 			left_layer := *root.left.grad.data[i]
-
 			right_data := *root.right.tensor.data[0]
 			for j := 0; j < root.l; j++ {
 				left_data := *root.left.tensor.data[j]
@@ -272,6 +291,8 @@ func backward(root *node) {
 
 			}
 		}
+		backward(root.left)
+		backward(root.right)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
@@ -285,18 +306,17 @@ func backward(root *node) {
 			}
 		}
 		root.left.grad = &data1
+		backward(root.left)
 	}
-	backward(root.left)
-	backward(root.right)
 }
 
 // Proxy for main() so I can do test runs
 func Run() {
-	x_0 := []float32{2., 2., 4.}
+	x_0 := []float32{2., -2., 4.}
 	x := tensor{[]*[]float32{&x_0}, 1, 3}
-	a_0 := []float32{1., 2., 3.}
-	a_1 := []float32{4., 5., 6.}
-	a_2 := []float32{7., 8., 9.}
+	a_0 := []float32{1., -2., 3.}
+	a_1 := []float32{-4., 5., 6.}
+	a_2 := []float32{7., -8., -9.}
 	a := tensor{[]*[]float32{&a_0, &a_1, &a_2}, 3, 3}
 	b_0 := []float32{3., 2., 1.}
 	b := tensor{[]*[]float32{&b_0}, 1, 3}
@@ -305,14 +325,12 @@ func Run() {
 	b_l := leaf(&b)
 	comp_lookup := map[string]*node{}
 	a_x := matmul(a_l, x_l, 3, 3)
-	comp_graph := add(a_x, b_l, 1, 3)
-	// comp_graph := matmul(a_l, x_l, 3, 3)
+	drop := dropout(a_x, 1, a_x.l, 0.3)
+	rel := relu(drop, drop.l2, drop.l)
+	comp_graph := add(rel, b_l, rel.l2, rel.l)
 	comp_lookup["x"] = x_l
 	comp_lookup["a"] = a_l
 	comp_lookup["b"] = b_l
-	// comp_lookup["mul"] = a_x
-	// comp_lookup["add"] = comp_graph
-
 	fmt.Println("Layers: ")
 	fmt.Println("Linear 1 = Ax + b")
 	fmt.Println("")
