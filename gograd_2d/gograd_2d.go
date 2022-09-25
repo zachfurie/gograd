@@ -87,17 +87,6 @@ func leaf(tens *tensor) *node {
 	return &new_node
 }
 
-//	func coef(tens *tensor) *node {
-//		zero_grad := ones(tens.l2, tens.l)
-//		new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
-//		return &new_node
-//	}
-//
-//	func input(tens *tensor) *node {
-//		zero_grad := ones(tens.l2, tens.l)
-//		new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
-//		return &new_node
-//	}
 func add(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
@@ -109,12 +98,6 @@ func mul(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
 	new_node := node{node1, node2, "*", &data, &zero_grad, l2, l}
-	return &new_node
-}
-
-func intermediary(tens *[]float32, node1 *node) *node {
-	tens2 := tensor{[]*[]float32{tens}, 1, node1.l}
-	new_node := node{node1, nil, "inter", &tens2, node1.grad, node1.l2, node1.l}
 	return &new_node
 }
 
@@ -266,13 +249,14 @@ func backward(root *node) {
 	backward(root.right)
 }
 
-// NN OPS:
+// Layers:
 // func linear(in *node, weight *node, bias *node) *node {
 // 	in_times_weight := node{in, weight, "*"}
 // 	plus_bias := node{&in_times_weight, bias, "+"}
 // 	return &plus_bias
 // }
 
+// Proxy for main() so I can do test runs
 func Run() {
 	x_0 := []float32{2., 2., 4.}
 	x := tensor{[]*[]float32{&x_0}, 1, 3}
