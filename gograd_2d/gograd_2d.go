@@ -33,7 +33,7 @@ type tensornd struct {
 	// see shape() for more info
 }
 
-// Utilities:
+// Auxiliary Functions:
 
 // Returns a 2d tensor of size (l2,l)
 func zeros(l2 int, l int) tensor {
@@ -128,8 +128,11 @@ func matmul(a *node, x *node, l2 int, l int) *node {
 	return &new_node
 }
 
-func relu() {
-	return
+func relu(a *node, l2 int, l int) *node {
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
+	new_node := node{a, nil, "relu", &data, &zero_grad, l2, l}
+	return &new_node
 }
 
 // ML OPS:
@@ -137,48 +140,60 @@ func relu() {
 func forward(root *node) *tensor {
 	if root.left == nil {
 		return root.tensor
-	} else {
-		if root.op == "+" {
-			// Return tensor a + b
-			t1 := forward(root.left)
-			t2 := forward(root.right)
-			for i := range root.tensor.data {
-				t0d := *root.tensor.data[i]
-				t1d := *t1.data[i]
-				t2d := *t2.data[i]
-				for j := range t0d {
-					t0d[j] = t1d[j] + t2d[j]
-				}
+	} else if root.op == "+" {
+		// Return tensor a + b
+		t1 := forward(root.left)
+		t2 := forward(root.right)
+		for i := range root.tensor.data {
+			t0d := *root.tensor.data[i]
+			t1d := *t1.data[i]
+			t2d := *t2.data[i]
+			for j := range t0d {
+				t0d[j] = t1d[j] + t2d[j]
 			}
-			return root.tensor
-		} else if root.op == "*" {
-			// Return tensor a * b
-			t1 := forward(root.left)
-			t2 := forward(root.right)
-			for i := range root.tensor.data {
-				t0d := *root.tensor.data[i]
-				t1d := *t1.data[i]
-				t2d := *t2.data[i]
-				for j := range t0d {
-					t0d[j] = t1d[j] * t2d[j]
-				}
-			}
-			return root.tensor
-		} else if root.op == "mm" {
-			a := forward(root.left)
-			x := forward(root.right)
-			x_layer := *x.data[0]
-			data := zeros(1, root.l)
-			data_layer := *data.data[0]
-			for i := 0; i < root.l2; i++ {
-				a_layer := *a.data[i]
-				for j := 0; j < root.l; j++ {
-					data_layer[i] += a_layer[j] * x_layer[j]
-				}
-				root.tensor = &data
-			}
-			return root.tensor
 		}
+		return root.tensor
+	} else if root.op == "*" {
+		// Return tensor a * b
+		t1 := forward(root.left)
+		t2 := forward(root.right)
+		for i := range root.tensor.data {
+			t0d := *root.tensor.data[i]
+			t1d := *t1.data[i]
+			t2d := *t2.data[i]
+			for j := range t0d {
+				t0d[j] = t1d[j] * t2d[j]
+			}
+		}
+		return root.tensor
+	} else if root.op == "mm" {
+		a := forward(root.left)
+		x := forward(root.right)
+		x_layer := *x.data[0]
+		data := zeros(1, root.l)
+		data_layer := *data.data[0]
+		for i := 0; i < root.l2; i++ {
+			a_layer := *a.data[i]
+			for j := 0; j < root.l; j++ {
+				data_layer[i] += a_layer[j] * x_layer[j]
+			}
+			root.tensor = &data
+		}
+		return root.tensor
+	} else if root.op == "relu" {
+		a := forward(root.left)
+		for i := 0; i < root.l2; i++ {
+			a_layer := *a.data[i]
+			data_layer := *root.tensor.data[i]
+			for j := 0; j < root.l; j++ {
+				if a_layer[j] < 0 {
+					data_layer[j] = 0
+				} else {
+					data_layer[j] = a_layer[j]
+				}
+			}
+		}
+		return root.tensor
 	}
 	return nil
 }
@@ -186,58 +201,69 @@ func forward(root *node) *tensor {
 func backward(root *node) {
 	if root.left == nil {
 		return
-	} else {
-		if root.op == "+" {
-			// Chain rule for a + b
-			root.left.grad = root.grad
-			root.right.grad = root.grad
-		} else if root.op == "*" {
-			// Chain rule for a * b
-			data1 := zeros(root.l2, root.l)
-			for i := 0; i < root.l2; i++ {
-				data_layer := *data1.data[i]
-				right_layer := *root.right.tensor.data[i]
-				grad_layer := *root.grad.data[i]
-				for j := 0; j < root.l; j++ {
-					data_layer[j] = right_layer[j] * grad_layer[j]
-				}
+	} else if root.op == "+" {
+		// Chain rule for a + b
+		root.left.grad = root.grad
+		root.right.grad = root.grad
+	} else if root.op == "*" {
+		// Chain rule for a * b
+		data1 := zeros(root.l2, root.l)
+		for i := 0; i < root.l2; i++ {
+			data_layer := *data1.data[i]
+			right_layer := *root.right.tensor.data[i]
+			grad_layer := *root.grad.data[i]
+			for j := 0; j < root.l; j++ {
+				data_layer[j] = right_layer[j] * grad_layer[j]
 			}
-			root.left.grad = &data1
+		}
+		root.left.grad = &data1
 
-			data2 := zeros(root.l2, root.l)
-			for i := 0; i < root.l2; i++ {
-				data_layer := *data2.data[i]
-				left_layer := *root.left.tensor.data[i]
-				grad_layer := *root.grad.data[i]
-				for j := 0; j < root.l; j++ {
-					data_layer[j] = left_layer[j] * grad_layer[j]
-				}
+		data2 := zeros(root.l2, root.l)
+		for i := 0; i < root.l2; i++ {
+			data_layer := *data2.data[i]
+			left_layer := *root.left.tensor.data[i]
+			grad_layer := *root.grad.data[i]
+			for j := 0; j < root.l; j++ {
+				data_layer[j] = left_layer[j] * grad_layer[j]
 			}
-			root.right.grad = &data2
-		} else if root.op == "mm" {
-			// gradient should be 1 x l -> l2 x l
-			// a = root.left
-			// x = root.right
-			right_layer := *root.right.grad.data[0]
-			for x := range right_layer {
-				right_layer[x] = 0
+		}
+		root.right.grad = &data2
+	} else if root.op == "mm" {
+		// gradient should be 1 x l -> l2 x l
+		// a = root.left
+		// x = root.right
+		right_layer := *root.right.grad.data[0]
+		for x := range right_layer {
+			right_layer[x] = 0
+		}
+		root_grad := *root.grad.data[0]
+		for i := 0; i < root.l2; i++ {
+			left_layer := *root.left.grad.data[i]
+
+			right_data := *root.right.tensor.data[0]
+			for j := 0; j < root.l; j++ {
+				left_data := *root.left.tensor.data[j]
+				left_layer[j] = right_data[j] * root_grad[i]
+				right_layer[i] += left_data[i] * root_grad[i]
+
 			}
-			root_grad := *root.grad.data[0]
-			for i := 0; i < root.l2; i++ {
-				left_layer := *root.left.grad.data[i]
-
-				right_data := *root.right.tensor.data[0]
-				for j := 0; j < root.l; j++ {
-					left_data := *root.left.tensor.data[j]
-					left_layer[j] = right_data[j] * root_grad[i]
-					right_layer[i] += left_data[i] * root_grad[i]
-
+		}
+	} else if root.op == "relu" {
+		data1 := zeros(root.l2, root.l)
+		for i := 0; i < root.l2; i++ {
+			data_layer := *data1.data[i]
+			relu_layer := *root.tensor.data[i]
+			grad_layer := *root.grad.data[i]
+			for j := 0; j < root.l; j++ {
+				if relu_layer[j] > 0 {
+					data_layer[j] = grad_layer[j]
 				}
 			}
 		}
-		backward(root.left)
-		backward(root.right)
+		root.left.grad = &data1
 	}
+	backward(root.left)
+	backward(root.right)
 }
 
 // NN OPS:
