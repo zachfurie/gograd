@@ -159,6 +159,9 @@ func dropout(a *node, l2 int, l int, drop_prob float32) *node {
 
 func linear(in *node, weight *node, bias *node) *node {
 	in_times_weight := matmul(weight, in, weight.l2, weight.l)
+	if weight.tensor.l2 == 1 || in.tensor.l2 > 1 {
+		in_times_weight = mul(weight, in, weight.l2, weight.l)
+	}
 	plus_bias := add(in_times_weight, bias, in_times_weight.tensor.l2, in_times_weight.l)
 	return plus_bias
 }
