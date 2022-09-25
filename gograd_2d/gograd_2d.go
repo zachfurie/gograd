@@ -150,7 +150,7 @@ func dropout(a *node, l2 int, l int, drop_prob float32) *node {
 // 	return &plus_bias
 // }
 
-// ----------------------------------- FORWARD AND BACKWARD:  -----------------------------------
+// ----------------------------------- FORWARD AND BACKWARD: -----------------------------------
 
 func forward(root *node) *tensor {
 	if root.op == "+" {
@@ -309,6 +309,8 @@ func backward(root *node) {
 		backward(root.left)
 	}
 }
+
+// ----------------------------------- TESTING (will be removed when done) -----------------------------------
 
 // Proxy for main() so I can do test runs
 func Run() {
