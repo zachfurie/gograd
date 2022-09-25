@@ -33,16 +33,11 @@ type tensor struct {
 	// grad bool
 }
 
-// 1d tensor (DEPRECIATED)
-type tensor1d struct {
-	data []float32
-	// grad bool
-}
-
 // nd tensor (will eventually only use this tensor struct)
 type tensornd struct {
 	data     []*tensornd
 	last_dim *[]float32
+	l        int // l is length of either data or last_dim, since tensors will only have either one or the other.
 	// for all except last dimension, last_dim is nil
 	// see shape() for more info
 }
@@ -94,6 +89,13 @@ func shape(t *tensornd) []int {
 	return shape_ret
 }
 
+// Creates a new tensor that is a copy of the input tensor with the input dimensions transposed.
+func transpose(t *tensornd, dim1 int, dim2 int) *tensornd {
+	// check shape to make sure dims are valid
+	// ...
+	return t
+}
+
 //  ----------------------------------- BASIC OPS:  -----------------------------------
 
 func leaf(tens *tensor) *node {
@@ -124,6 +126,17 @@ func matmul(a *node, x *node, l2 int, l int) *node {
 	return &new_node
 }
 
+// PROBLEM: seems like how I am coding it right now, it is assuming that b is already transposed
+// // matmul(A,B) -> A = [l2 x l] matrix, b = [] vector
+// func matmul2d(a *node, b *node) *node {
+// 	l2 = a.l2
+// 	l = b.l
+// 	zero_grad := ones(l2, l)
+// 	data := zeros(1, l)
+// 	new_node := node{a, x, "mm", &data, &zero_grad, l2, l}
+// 	return &new_node
+// }
+
 //  ----------------------------------- ML OPS:  -----------------------------------
 
 func relu(a *node, l2 int, l int) *node {
@@ -144,11 +157,11 @@ func dropout(a *node, l2 int, l int, drop_prob float32) *node {
 	return &new_node
 }
 
-// func linear(in *node, weight *node, bias *node) *node {
-// 	in_times_weight := node{in, weight, "*"}
-// 	plus_bias := node{&in_times_weight, bias, "+"}
-// 	return &plus_bias
-// }
+func linear(in *node, weight *node, bias *node) *node {
+	in_times_weight := matmul(weight, in, weight.l2, weight.l)
+	plus_bias := add(in_times_weight, bias, in_times_weight.tensor.l2, in_times_weight.l)
+	return plus_bias
+}
 
 // ----------------------------------- FORWARD AND BACKWARD: -----------------------------------
 
