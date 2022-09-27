@@ -111,6 +111,7 @@ func add(node1 *node, node2 *node, l2 int, l int) *node {
 	return &new_node
 }
 
+// dot product
 func mul(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
