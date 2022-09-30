@@ -17,13 +17,14 @@ import (
 
 // Comp Graph Node
 type node struct {
-	left   *node
-	right  *node
-	op     string
-	tensor *tensor
-	grad   *tensor
-	l2     int
-	l      int
+	left         *node
+	right        *node
+	op           string
+	tensor       *tensor
+	grad         *tensor
+	l2           int
+	l            int
+	require_grad bool
 }
 
 // 2d tensor
@@ -108,16 +109,16 @@ func sum(a []float64) float64 {
 
 //  ----------------------------------- BASIC OPS:  -----------------------------------
 
-func leaf(tens *tensor) *node {
+func leaf(tens *tensor, require_grad bool) *node {
 	zero_grad := ones(tens.l2, tens.l)
-	new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l}
+	new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l, require_grad}
 	return &new_node
 }
 
 func add(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
-	new_node := node{node1, node2, "+", &data, &zero_grad, l2, l}
+	new_node := node{node1, node2, "+", &data, &zero_grad, l2, l, true}
 	return &new_node
 }
 
@@ -125,7 +126,7 @@ func add(node1 *node, node2 *node, l2 int, l int) *node {
 func mul(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
-	new_node := node{node1, node2, "*", &data, &zero_grad, l2, l}
+	new_node := node{node1, node2, "*", &data, &zero_grad, l2, l, true}
 	return &new_node
 }
 
@@ -133,7 +134,7 @@ func mul(node1 *node, node2 *node, l2 int, l int) *node {
 func matmul(a *node, x *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(1, l)
-	new_node := node{a, x, "mm", &data, &zero_grad, l2, l}
+	new_node := node{a, x, "mm", &data, &zero_grad, l2, l, true}
 	return &new_node
 }
 
@@ -153,7 +154,7 @@ func matmul(a *node, x *node, l2 int, l int) *node {
 func relu(a *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
-	new_node := node{a, nil, "relu", &data, &zero_grad, l2, l}
+	new_node := node{a, nil, "relu", &data, &zero_grad, l2, l, true}
 	return &new_node
 }
 
@@ -161,10 +162,10 @@ func dropout(a *node, l2 int, l int, drop_prob float64) *node {
 	drop_prob_data := []float64{drop_prob}
 	drop_prob_tensor := tensor{[]*[]float64{&drop_prob_data}, 1, l}
 	// drop_prob_tensor := tensornd{last_dim: &drop_prob_data}
-	drop_prob_input := leaf(&drop_prob_tensor)
+	drop_prob_input := leaf(&drop_prob_tensor, true)
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
-	new_node := node{a, drop_prob_input, "do", &data, &zero_grad, l2, l}
+	new_node := node{a, drop_prob_input, "do", &data, &zero_grad, l2, l, true}
 	return &new_node
 }
 
@@ -180,7 +181,7 @@ func linear(in *node, weight *node, bias *node) *node {
 func log_softmax(in *node, target *node) *node {
 	zero_grad := ones(in.tensor.l2, in.tensor.l)
 	data := zeros(in.tensor.l2, in.tensor.l)
-	new_node := node{in, target, "sm", &data, &zero_grad, in.tensor.l2, in.tensor.l}
+	new_node := node{in, target, "sm", &data, &zero_grad, in.tensor.l2, in.tensor.l, true}
 	return &new_node
 }
 
@@ -200,13 +201,47 @@ func nll_loss(pred *tensor, target *tensor) (float64, tensor) {
 }
 
 // initialize adam optimizer
-func adam() {
+type adam_init struct {
+	// alpha float32, b1 float32, b2 float32
+	m1 float64 // init to 0
+	m2 float64 // init to 0
+	t  float64 // init to 0
 
 }
 
-// step optimizer
-func step() {
-
+// adam step function
+func adam(weights []*node, init adam_init) {
+	// parameters: would normally get these from adam_init
+	alpha := 0.001
+	b1 := 0.9
+	b2 := 0.999
+	epsilon := math.Pow(10, -8)
+	// ------------
+	m1 := init.m1
+	m2 := init.m2
+	t := init.t
+	for _, w := range weights {
+		if w.require_grad == false {
+			continue
+		}
+		grad_layer := *w.grad.data[0]
+		for i := 0; i < w.l2; i++ {
+			if w.grad.l2 > 1 {
+				grad_layer = *w.grad.data[i]
+			}
+			data_layer := *w.tensor.data[i]
+			for j := 0; j < w.l; j++ {
+				biased_m1 := (m1 * b1) + ((1 - b1) * grad_layer[j])
+				biased_m2 := (m2 * b2) + ((1 - b2) * math.Pow(grad_layer[j], 2))
+				m1 := biased_m1 / math.Pow(b1, t)
+				m2 := biased_m2 / math.Pow(b2, t)
+				data_layer[j] = data_layer[j] - (alpha * m1 / (math.Sqrt(m2) + epsilon))
+			}
+		}
+	}
+	init.m1 = m1
+	init.m2 = m2
+	init.t += 1
 }
 
 // ----------------------------------- FORWARD AND BACKWARD: -----------------------------------
@@ -418,9 +453,9 @@ func Run() {
 	a := tensor{[]*[]float64{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
 	b_0 := []float64{3., 2., 1., 3., 2., 1.}
 	b := tensor{[]*[]float64{&b_0}, 1, 6}
-	x_l := leaf(&x)
-	a_l := leaf(&a)
-	b_l := leaf(&b)
+	x_l := leaf(&x, true)
+	a_l := leaf(&a, true)
+	b_l := leaf(&b, true)
 	comp_lookup := map[string]*node{}
 	drop := dropout(a_l, a_l.l2, a_l.l, 0.4)
 	a_x := matmul(drop, x_l, 6, 6)
