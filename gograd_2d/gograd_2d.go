@@ -2,6 +2,7 @@ package gograd_2d
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 )
 
@@ -27,7 +28,7 @@ type node struct {
 
 // 2d tensor
 type tensor struct {
-	data []*[]float32
+	data []*[]float64
 	l2   int
 	l    int
 	// grad bool
@@ -36,7 +37,7 @@ type tensor struct {
 // nd tensor (will eventually only use this tensor struct)
 type tensornd struct {
 	data     []*tensornd
-	last_dim *[]float32
+	last_dim *[]float64
 	l        int // l is length of either data or last_dim, since tensors will only have either one or the other.
 	// for all except last dimension, last_dim is nil
 	// see shape() for more info
@@ -46,9 +47,9 @@ type tensornd struct {
 
 // Returns a 2d tensor of size (l2,l)
 func zeros(l2 int, l int) tensor {
-	zero_grad_pts := make([]*[]float32, l2)
+	zero_grad_pts := make([]*[]float64, l2)
 	for i := range zero_grad_pts {
-		zero_grad_data := make([]float32, l)
+		zero_grad_data := make([]float64, l)
 		for j := range zero_grad_data {
 			zero_grad_data[j] = 0
 		}
@@ -59,9 +60,9 @@ func zeros(l2 int, l int) tensor {
 
 // Returns a 2d tensor of size (l2,l)
 func ones(l2 int, l int) tensor {
-	zero_grad_pts := make([]*[]float32, l2)
+	zero_grad_pts := make([]*[]float64, l2)
 	for i := range zero_grad_pts {
-		zero_grad_data := make([]float32, l)
+		zero_grad_data := make([]float64, l)
 		for j := range zero_grad_data {
 			zero_grad_data[j] = 1
 		}
@@ -94,6 +95,15 @@ func transpose(t *tensornd, dim1 int, dim2 int) *tensornd {
 	// check shape to make sure dims are valid
 	// ...
 	return t
+}
+
+// sum of float64 slice
+func sum(a []float64) float64 {
+	result := 0.
+	for _, v := range a {
+		result += v
+	}
+	return result
 }
 
 //  ----------------------------------- BASIC OPS:  -----------------------------------
@@ -147,9 +157,9 @@ func relu(a *node, l2 int, l int) *node {
 	return &new_node
 }
 
-func dropout(a *node, l2 int, l int, drop_prob float32) *node {
-	drop_prob_data := []float32{drop_prob}
-	drop_prob_tensor := tensor{[]*[]float32{&drop_prob_data}, 1, l}
+func dropout(a *node, l2 int, l int, drop_prob float64) *node {
+	drop_prob_data := []float64{drop_prob}
+	drop_prob_tensor := tensor{[]*[]float64{&drop_prob_data}, 1, l}
 	// drop_prob_tensor := tensornd{last_dim: &drop_prob_data}
 	drop_prob_input := leaf(&drop_prob_tensor)
 	zero_grad := ones(l2, l)
@@ -167,10 +177,43 @@ func linear(in *node, weight *node, bias *node) *node {
 	return plus_bias
 }
 
+func log_softmax(in *node, target *node) *node {
+	zero_grad := ones(in.tensor.l2, in.tensor.l)
+	data := zeros(in.tensor.l2, in.tensor.l)
+	new_node := node{in, target, "sm", &data, &zero_grad, in.tensor.l2, in.tensor.l}
+	return &new_node
+}
+
+//  ----------------------------------- LOSS AND OPTIM:  -----------------------------------
+
+// takes prediction tensor and target tensor as inputs, returns loss and gradients
+func nll_loss(pred *tensor, target *tensor) (float64, tensor) {
+	loss := 0.
+	grad := ones(pred.l2, pred.l)
+	grad_layer := *grad.data[0]
+	for i, t := range *target.data[0] {
+		p := *pred.data[0]
+		loss -= t * p[i]
+		grad_layer[i] = t
+	}
+	return loss, grad
+}
+
+// initialize adam optimizer
+func adam() {
+
+}
+
+// step optimizer
+func step() {
+
+}
+
 // ----------------------------------- FORWARD AND BACKWARD: -----------------------------------
 
+// would probably be more efficient for one data tensor to get passed thru forward instead of each node having its own data tensor.
 func forward(root *node) *tensor {
-	if root.op == "+" {
+	if root.op == "+" { // add
 		// Return tensor a + b
 		t1 := forward(root.left)
 		t2 := forward(root.right)
@@ -183,7 +226,7 @@ func forward(root *node) *tensor {
 				t0d[j] = t1d[j] + t2d[j]
 			}
 		}
-	} else if root.op == "*" {
+	} else if root.op == "*" { // mul
 		// Return tensor a * b
 		t1 := forward(root.left)
 		t2 := forward(root.right)
@@ -195,7 +238,7 @@ func forward(root *node) *tensor {
 				t0d[j] = t1d[j] * t2d[j]
 			}
 		}
-	} else if root.op == "mm" {
+	} else if root.op == "mm" { // matmul
 		a := forward(root.left)
 		x := forward(root.right)
 		x_layer := *x.data[0]
@@ -208,7 +251,7 @@ func forward(root *node) *tensor {
 			}
 			root.tensor = &data
 		}
-	} else if root.op == "relu" {
+	} else if root.op == "relu" { // relu
 		a := forward(root.left)
 		for i := 0; i < a.l2; i++ {
 			a_layer := *a.data[i]
@@ -221,7 +264,7 @@ func forward(root *node) *tensor {
 				}
 			}
 		}
-	} else if root.op == "do" {
+	} else if root.op == "do" { // dropout
 		a := forward(root.left)
 		for i := 0; i < a.l2; i++ {
 			a_layer := *a.data[i]
@@ -229,11 +272,24 @@ func forward(root *node) *tensor {
 			drop_prob := *root.right.tensor.data[0]
 			drop_prob_float := drop_prob[0]
 			for j := 0; j < a.l; j++ {
-				if rand.Float32() < drop_prob_float {
+				if rand.Float64() < drop_prob_float {
 					data_layer[j] = 0
 				} else {
 					data_layer[j] = a_layer[j] / (1 - drop_prob_float) // inverted dropout scaling -> x/(1-p)
 				}
+			}
+		}
+	} else if root.op == "sm" { // Softmax
+		a := forward(root.left)
+		for i := 0; i < a.l2; i++ {
+			a_layer := *a.data[i]
+			data_layer := *root.tensor.data[i]
+			layer_sum := 0.
+			for j := 0; j < a.l; j++ {
+				layer_sum += math.Exp(a_layer[j])
+			}
+			for j := 0; j < a.l; j++ {
+				data_layer[j] = a_layer[j] - math.Log(layer_sum)
 			}
 		}
 	}
@@ -324,6 +380,26 @@ func backward(root *node) {
 		}
 		root.left.grad = &data1
 		backward(root.left)
+	} else if root.op == "sm" {
+		ret_grad := zeros(root.l2, root.l)
+		for i := 0; i < root.tensor.l2; i++ {
+			target_layer := *root.right.tensor.data[0]
+			target_index := -1
+			for i, t := range target_layer {
+				if t == 1 {
+					target_index = i
+				}
+			}
+			grad_layer := *root.grad.data[i]
+			data_layer := *root.tensor.data[i]
+			ret_layer := *ret_grad.data[i]
+			for j := 0; j < root.tensor.l; j++ {
+				ret_layer[j] = -data_layer[j] * grad_layer[j]
+			}
+			grad_layer[target_index] += 1. * grad_layer[target_index]
+		}
+		root.left.grad = &ret_grad
+		backward(root.left)
 	}
 }
 
@@ -331,17 +407,17 @@ func backward(root *node) {
 
 // Proxy for main() so I can do test runs
 func Run() {
-	x_0 := []float32{2., -2., 4., 2., -2., 4.}
-	x := tensor{[]*[]float32{&x_0}, 1, 6}
-	a_0 := []float32{1., -2., 3., 1., -2., 3.}
-	a_1 := []float32{-4., 5., 6., -4., 5., 6.}
-	a_2 := []float32{7., -8., -9., 7., -8., -9.}
-	a_3 := []float32{1., -2., 3., 1., -2., 3.}
-	a_4 := []float32{-4., 5., 6., -4., 5., 6.}
-	a_5 := []float32{7., -8., -9., 7., -8., -9.}
-	a := tensor{[]*[]float32{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
-	b_0 := []float32{3., 2., 1., 3., 2., 1.}
-	b := tensor{[]*[]float32{&b_0}, 1, 6}
+	x_0 := []float64{2., -2., 4., 2., -2., 4.}
+	x := tensor{[]*[]float64{&x_0}, 1, 6}
+	a_0 := []float64{1., -2., 3., 1., -2., 3.}
+	a_1 := []float64{-4., 5., 6., -4., 5., 6.}
+	a_2 := []float64{7., -8., -9., 7., -8., -9.}
+	a_3 := []float64{1., -2., 3., 1., -2., 3.}
+	a_4 := []float64{-4., 5., 6., -4., 5., 6.}
+	a_5 := []float64{7., -8., -9., 7., -8., -9.}
+	a := tensor{[]*[]float64{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
+	b_0 := []float64{3., 2., 1., 3., 2., 1.}
+	b := tensor{[]*[]float64{&b_0}, 1, 6}
 	x_l := leaf(&x)
 	a_l := leaf(&a)
 	b_l := leaf(&b)
