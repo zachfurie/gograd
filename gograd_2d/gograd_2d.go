@@ -286,11 +286,10 @@ func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
 // initialize adam optimizer
 type adam_init struct {
 	// alpha float32, b1 float32, b2 float32
-	m1    float64 // init to 0
-	m2    float64 // init to 0
-	t     float64 // init to 0
-	alpha float64 // init to 0.0001
-
+	t        float64 // init to 0
+	alpha    float64 // init to 0.0001
+	prev_m1s []*tensor
+	prev_m2s []*tensor
 }
 
 // adam step function
@@ -301,27 +300,31 @@ func adam(weights []*node, init adam_init) {
 	b2 := 0.999
 	epsilon := math.Pow(10, -8)
 	// ------------
-	m1 := init.m1
-	m2 := init.m2
 	t := init.t
-	for _, w := range weights {
+	for k, w := range weights {
 		if !w.require_grad {
 			continue
 		}
+		prev_m1 := *init.prev_m1s[k]
+		prev_m2 := *init.prev_m2s[k]
 		for i := 0; i < w.l2; i++ {
 			grad_layer := *w.grad.data[i]
 			data_layer := *w.tensor.data[i]
+			prev_m1_layer := *prev_m1.data[i]
+			prev_m2_layer := *prev_m2.data[i]
 			for j := 0; j < w.l; j++ {
+				m1 := prev_m1_layer[j]
+				m2 := prev_m2_layer[j]
 				biased_m1 := (m1 * b1) + ((1 - b1) * grad_layer[j])
 				biased_m2 := (m2 * b2) + ((1 - b2) * math.Pow(grad_layer[j], 2))
-				m1 := biased_m1 / math.Pow(b1, t)
-				m2 := biased_m2 / math.Pow(b2, t)
+				m1 = biased_m1 / math.Pow(b1, t)
+				m2 = biased_m2 / math.Pow(b2, t)
 				data_layer[j] = data_layer[j] - (alpha * m1 / (math.Sqrt(m2) + epsilon))
+				prev_m1_layer[j] = m1
+				prev_m2_layer[j] = m2
 			}
 		}
 	}
-	init.m1 = m1
-	init.m2 = m2
 	init.t += 1
 }
 
@@ -565,20 +568,20 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	rel1 := relu(l1, x_node.tensor.l2, 784)
 	l2, l2_weight, l2_bias := linear(rel1, 256)
 	rel2 := relu(l2, x_node.tensor.l2, 256)
-	l3, l3_weight, l3_bias := linear(rel2, 10)
-	// rel3 := relu(l3, x_node.tensor.l2, 10)
-	// l4, l4_weight, l4_bias := linear(rel3, 10)
-	sm := log_softmax(l3, y_node)
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias} //, l4_weight, l4_bias}
+	l3, l3_weight, l3_bias := linear(rel2, 128)
+	rel3 := relu(l3, x_node.tensor.l2, 128)
+	l4, l4_weight, l4_bias := linear(rel3, 10)
+	sm := log_softmax(l4, y_node)
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 
 	return sm, params, x_node, y_node
 }
 
 // simple neural net
 func Simple() {
-	num_batches := 4
-	batch_size := 4
-	num_epochs := 10
+	num_batches := 5
+	batch_size := 5
+	num_epochs := 30
 
 	// open file
 	f, err := os.Open("mnist_train.csv")
@@ -655,8 +658,16 @@ func Simple() {
 	y := train_y[0]
 	best_loss := 999999999.
 	loss_list := make([]float64, num_epochs) // 10
-	opt := adam_init{0., 0., 0, 0.0001}
 	sm, params, x_node, y_node := _simple(x, y)
+	prev_m1s := make([]*tensor, len(params))
+	prev_m2s := make([]*tensor, len(params))
+	for i, x := range params {
+		prev1 := zeros(x.l2, x.l)
+		prev2 := zeros(x.l2, x.l)
+		prev_m1s[i] = &prev1
+		prev_m2s[i] = &prev2
+	}
+	opt := adam_init{0, 0.0001, prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
 	for epoch := range loss_list {
 		total_loss := 0.
