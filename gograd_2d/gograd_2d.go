@@ -164,6 +164,12 @@ func pt_exp(t *tensor, name string) {
 		layer := *t.data[i]
 		exp_layer := make([]float32, t.l)
 		for j := range layer {
+			// if layer[j] > 700. {
+			// 	layer[j] = 700.
+			// }
+			// if layer[j] < -700. {
+			// 	layer[j] = -700.
+			// }
 			exp_layer[j] = float32(int(1000.*math.Exp(layer[j]))) / 1000.
 		}
 		fmt.Println(i, ": ", exp_layer)
@@ -250,7 +256,7 @@ func log_softmax(in *node, target *node) *node {
 //  ----------------------------------- LOSS AND OPTIM:  -----------------------------------
 
 // takes prediction tensor and target tensor as inputs, returns loss and gradients
-func nll_loss(pred *tensor, target *tensor) (float64, tensor) {
+func nll_loss(pred *tensor, target *tensor) (float64, *tensor) {
 	loss := 0.
 	grad := ones(pred.l2, pred.l)
 	for j := range target.data {
@@ -262,7 +268,8 @@ func nll_loss(pred *tensor, target *tensor) (float64, tensor) {
 			grad_layer[i] = -t
 		}
 	}
-	return loss, grad
+
+	return loss, &grad
 }
 
 func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
@@ -272,10 +279,7 @@ func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
 		grad_layer := *grad.data[j]
 		target_layer := *target.data[j]
 		pred_layer := *pred.data[j]
-		// fmt.Println(len(target_layer), len(pred_layer))
 		for i, t := range target_layer {
-			// fmt.Println(t)
-			// fmt.Println(pred_layer[i])
 			loss += math.Pow((pred_layer[i] - t), 2)
 			grad_layer[i] = 2 * (pred_layer[i] - t)
 		}
@@ -313,16 +317,26 @@ func adam(weights []*node, init adam_init) {
 			prev_m1_layer := *prev_m1.data[i]
 			prev_m2_layer := *prev_m2.data[i]
 			for j := 0; j < w.l; j++ {
+				// gradient clipping
+				if grad_layer[j] > 1. {
+					grad_layer[j] = 1.
+				}
+				if grad_layer[j] < -1. {
+					grad_layer[j] = -1.
+				}
+
 				m1 := prev_m1_layer[j]
 				m2 := prev_m2_layer[j]
-				biased_m1 := (m1 * b1) + ((1 - b1) * grad_layer[j])
-				biased_m2 := (m2 * b2) + ((1 - b2) * math.Pow(grad_layer[j], 2))
+				biased_m1 := (m1 * b1) + ((1. - b1) * grad_layer[j])
+				biased_m2 := (m2 * b2) + ((1. - b2) * math.Pow(grad_layer[j], 2.))
 				m1 = biased_m1 / math.Pow(b1, t)
 				m2 = biased_m2 / math.Pow(b2, t)
 				data_layer[j] = data_layer[j] - (alpha * m1 / (math.Sqrt(m2) + epsilon))
 				prev_m1_layer[j] = m1
 				prev_m2_layer[j] = m2
 			}
+			prev_m1.data[i] = &prev_m1_layer
+			prev_m2.data[i] = &prev_m2_layer
 		}
 	}
 	init.t += 1
@@ -428,12 +442,12 @@ func forward(root *node) *tensor {
 			data_layer := *root.tensor.data[i]
 			layer_sum := 0.
 			for j := 0; j < a.l; j++ {
-				if a_layer[j] > 700. {
-					a_layer[j] = 700.
-				}
-				if a_layer[j] < -700. {
-					a_layer[j] = -700.
-				}
+				// if a_layer[j] > 700. {
+				// 	a_layer[j] = 700.
+				// }
+				// if a_layer[j] < -700. {
+				// 	a_layer[j] = -700.
+				// }
 				layer_sum += math.Exp(a_layer[j])
 			}
 			for j := 0; j < a.l; j++ {
@@ -442,7 +456,7 @@ func forward(root *node) *tensor {
 		}
 	}
 
-	// fmt.Println(root.op, " | ", *root.tensor.data[2])
+	// pt(root.tensor, root.op)
 	// fmt.Println("--------------------------------------")
 	// fmt.Println("")
 
@@ -535,24 +549,14 @@ func backward(root *node) {
 		root.left.grad = &data1
 		backward(root.left)
 	} else if root.op == "sm" {
-		ret_grad := zeros(root.l2, root.l)
 		for i := 0; i < root.tensor.l2; i++ {
-			target_layer := *root.right.tensor.data[0]
-			target_index := -1
-			for i, t := range target_layer {
-				if t == 1. {
-					target_index = i
-				}
-			}
 			grad_layer := *root.grad.data[i]
 			data_layer := *root.tensor.data[i]
-			ret_layer := *ret_grad.data[i]
+			ret_layer := *root.left.grad.data[i]
 			for j := 0; j < root.tensor.l; j++ {
-				ret_layer[j] = -data_layer[j] * grad_layer[j]
+				ret_layer[j] = (1. - data_layer[j]) * grad_layer[j]
 			}
-			grad_layer[target_index] += 1. * grad_layer[target_index]
 		}
-		root.left.grad = &ret_grad
 		backward(root.left)
 	}
 }
@@ -566,39 +570,36 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	// NN:
 	l1, l1_weight, l1_bias := linear(x_node, 784)
 	rel1 := relu(l1, x_node.tensor.l2, 784)
-	l2, l2_weight, l2_bias := linear(rel1, 256)
-	rel2 := relu(l2, x_node.tensor.l2, 256)
-	l3, l3_weight, l3_bias := linear(rel2, 128)
-	rel3 := relu(l3, x_node.tensor.l2, 128)
-	l4, l4_weight, l4_bias := linear(rel3, 10)
-	sm := log_softmax(l4, y_node)
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
+	l2, l2_weight, l2_bias := linear(rel1, 128) //256
+	rel2 := relu(l2, x_node.tensor.l2, 128)     //256
+	l3, l3_weight, l3_bias := linear(rel2, 10)  //128
+	// rel3 := relu(l3, x_node.tensor.l2, 128)
+	// l4, l4_weight, l4_bias := linear(rel3, 10)
+	sm := log_softmax(l3, y_node)
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias} //, l4_weight, l4_bias}
 
 	return sm, params, x_node, y_node
 }
 
 // simple neural net
 func Simple() {
-	num_batches := 5
-	batch_size := 5
-	num_epochs := 30
+	num_batches := 10
+	batch_size := 64
+	num_epochs := 1000
 
-	// open file
+	// Read Data
 	f, err := os.Open("mnist_train.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// remember to close the file at the end of the program
 	defer f.Close()
-
-	// read csv values using csv.Reader
 	csvReader := csv.NewReader(f)
 	data, err := csvReader.ReadAll()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Create train and test sets
 	train_x := make([]*tensor, num_batches)      // 1000
 	train_y := make([]*tensor, num_batches)      // 1000
 	test_x := make([]*tensor, num_batches/10.+1) // 1000
@@ -614,7 +615,7 @@ func Simple() {
 			y_layer[y_val] = 1.
 			for j := range x_layer {
 				x_val, _ := strconv.Atoi(data[data_index][j])
-				x_layer[j] = float64(x_val) // / 255.
+				x_layer[j] = float64(x_val) / 255.
 			}
 			data_index += 1
 		}
@@ -631,7 +632,7 @@ func Simple() {
 			y_layer[y_val] = 1.
 			for j := range x_layer {
 				x_val, _ := strconv.Atoi(data[data_index][j])
-				x_layer[j] = float64(x_val) // / 255.
+				x_layer[j] = float64(x_val) / 255.
 			}
 			data_index += 1
 		}
@@ -667,34 +668,42 @@ func Simple() {
 		prev_m1s[i] = &prev1
 		prev_m2s[i] = &prev2
 	}
-	opt := adam_init{0, 0.0001, prev_m1s, prev_m2s}
+	lr := 0.00001
+	opt := adam_init{0, 0., prev_m1s, prev_m2s} // replace second parameter with lr if the learning rate scheduler doesnt work
 	fmt.Println("======= START TRAINING ======")
 	for epoch := range loss_list {
 		total_loss := 0.
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
-			// x = train_x[batch]
-			// y = train_y[batch]
 			pred := forward(sm)
 			loss, grads := nll_loss(pred, y_node.tensor)
 			// loss, grads := least_squares_loss(pred, y_node.tensor)
-			sm.grad = &grads
+
+			loss = loss / float64(batch_size)
+			total_loss += loss
+
+			sm.grad = grads
 			backward(sm)
 			adam(params, opt)
 			// simple_step(params, opt)
 
-			total_loss += loss
+			// LR SCHEDULER (untested)
+			if epoch < num_epochs/10 {
+				opt.alpha = opt.alpha + lr/float64(num_epochs/10)
+			} else {
+				opt.alpha = opt.alpha - lr/float64(num_epochs)
+			}
 
-			// fmt.Println(*y_node.tensor.data[2])
-
-			// pt(pred, "epoch "+strconv.Itoa(epoch)+" preds")
+			// pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
 			// pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
+			// fmt.Println("batch loss: ", loss)
 
 			if batch == num_batches-1 {
 				// pt(x_node.tensor, "epoch "+strconv.Itoa(epoch)+" input")
 				pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
 				pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
+				// pt(params[0].grad, "epoch "+strconv.Itoa(epoch)+" grad")
 				// for i, p := range params {
 				// 	pt(p.tensor, "param "+strconv.Itoa(i))
 				// 	pt(p.grad, "grad "+strconv.Itoa(i))
@@ -715,15 +724,14 @@ func Simple() {
 			// loss_list[epoch] = loss
 
 		}
-		total_loss = total_loss / (float64(num_batches * batch_size))
+		total_loss = total_loss / (float64(num_batches))
 		fmt.Println(epoch, " | ", total_loss)
-		// if total_loss > best_loss {
-		// 	break
-		// }
+		if total_loss > best_loss {
+			break
+		}
 		if total_loss < best_loss {
 			best_loss = total_loss
 		}
-
 	}
 	fmt.Println("BEST LOSS: ", best_loss)
 	total_loss := 0.
@@ -738,9 +746,10 @@ func Simple() {
 			pt(y, " y")
 		}
 		loss, _ := nll_loss(pred, y_node.tensor)
+		loss = loss / float64(batch_size)
 		total_loss += loss
 	}
-	fmt.Println("Validation Data", " | ", total_loss/(float64(batch_size*len(test_x))))
+	fmt.Println("Validation Data", " | ", total_loss/(float64(len(test_x))))
 }
 
 // Proxy for main() so I can do test runs
@@ -766,7 +775,7 @@ func Run() {
 
 	loss, grad := nll_loss(&t1, &t2)
 	fmt.Println(loss)
-	pt(&grad, "grad")
+	pt(grad, "grad")
 	os.Exit(0)
 
 	x_2 := []float64{2., -2., 4., 2., 0., 4.}

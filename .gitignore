@@ -1,3 +1,4 @@
 *.csv
 *.icloud
 mnist_train.csv
+.ipynb
