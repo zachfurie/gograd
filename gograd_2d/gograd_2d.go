@@ -1,24 +1,17 @@
 package gograd_2d
 
 import (
-	// "encoding/csv"
 	"encoding/csv"
 	"fmt"
 	"log"
-	"strconv"
-	"time"
-
-	// "log"
 	"math"
 	"math/rand"
 	"os"
-	// "strconv"
+	"strconv"
+	"time"
 )
 
 // ----------------------------------- Notes: -----------------------------------
-
-// If all nodes are passing a tensor to next node during forward pass,
-// prob don't need to have weights as inputs to OP funcs.
 
 // Need to refactor code to use tensornd structs instead of tensor structs.
 
@@ -53,6 +46,8 @@ type tensornd struct {
 	// see shape() for more info
 }
 
+// Will be implementing an alternative tensor design which uses a single slice instead of slices of pointers of slices of pointers of...
+
 //  ----------------------------------- Auxiliary Functions:  -----------------------------------
 
 // Returns a 2d tensor of size (l2,l)
@@ -81,6 +76,7 @@ func ones(l2 int, l int) tensor {
 	return tensor{zero_grad_pts, l2, l}
 }
 
+// Returns a tensor with weights initialized from normal distribution * sqrt(2/n), where n is number of elements being initialized
 func init_weights(l2 int, l int) tensor {
 	// Initializing for ReLU: https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
 	std := math.Sqrt(2. / float64(l))
@@ -99,6 +95,7 @@ func init_weights(l2 int, l int) tensor {
 	return tensor{zero_grad_pts, l2, l}
 }
 
+// Returns tensor of integers in range [-10,10] (used for testing, not really useful otherwise)
 func init_ints(l2 int, l int) tensor {
 	zero_grad_pts := make([]*[]float64, l2)
 	for i := range zero_grad_pts {
@@ -160,18 +157,13 @@ func pt(t *tensor, name string) {
 	fmt.Println("-----]")
 }
 
+// Print Exp(Tensor)
 func pt_exp(t *tensor, name string) {
 	fmt.Println("[-----", name)
 	for i := range t.data {
 		layer := *t.data[i]
 		exp_layer := make([]float32, t.l)
 		for j := range layer {
-			// if layer[j] > 700. {
-			// 	layer[j] = 700.
-			// }
-			// if layer[j] < -700. {
-			// 	layer[j] = -700.
-			// }
 			exp_layer[j] = float32(int(1000.*math.Exp(layer[j]))) / 1000.
 		}
 		fmt.Println(i, ": ", exp_layer)
@@ -181,12 +173,14 @@ func pt_exp(t *tensor, name string) {
 
 //  ----------------------------------- BASIC OPS:  -----------------------------------
 
+// Inputs, weights, etc
 func leaf(tens *tensor, require_grad bool) *node {
 	zero_grad := ones(tens.l2, tens.l)
 	new_node := node{nil, nil, "leaf", tens, &zero_grad, tens.l2, tens.l, require_grad}
 	return &new_node
 }
 
+// Syntactic sugar for leaf nodes that are weights
 func weight(l2 int, l int) *node {
 	tens := init_weights(l2, l)
 	zero_grad := ones(tens.l2, tens.l)
@@ -194,6 +188,7 @@ func weight(l2 int, l int) *node {
 	return &new_node
 }
 
+// Add two identically shaped tensors
 func add(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
@@ -201,7 +196,7 @@ func add(node1 *node, node2 *node, l2 int, l int) *node {
 	return &new_node
 }
 
-// dot product
+// Dot Product
 func mul(node1 *node, node2 *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
@@ -209,7 +204,7 @@ func mul(node1 *node, node2 *node, l2 int, l int) *node {
 	return &new_node
 }
 
-// matmul(A,x) -> A = [l2 x l] matrix, x = [l] vector
+// Matrix Multiplication
 func matmul(a *node, x *node, l2 int, l int) *node {
 	zero_grad := ones(x.l2, a.l2)
 	data := zeros(x.l2, a.l2)
@@ -219,6 +214,7 @@ func matmul(a *node, x *node, l2 int, l int) *node {
 
 //  ----------------------------------- ML OPS:  -----------------------------------
 
+// ReLU layer
 func relu(a *node, l2 int, l int) *node {
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
@@ -226,10 +222,10 @@ func relu(a *node, l2 int, l int) *node {
 	return &new_node
 }
 
+// Dropout layer
 func dropout(a *node, l2 int, l int, drop_prob float64) *node {
 	drop_prob_data := []float64{drop_prob}
 	drop_prob_tensor := tensor{[]*[]float64{&drop_prob_data}, 1, l}
-	// drop_prob_tensor := tensornd{last_dim: &drop_prob_data}
 	drop_prob_input := leaf(&drop_prob_tensor, true)
 	zero_grad := ones(l2, l)
 	data := zeros(l2, l)
@@ -237,17 +233,16 @@ func dropout(a *node, l2 int, l int, drop_prob float64) *node {
 	return &new_node
 }
 
-// returns output, weight, bias
+// Linear layer. Returns output, weight, bias so that weight and bias can be put in params[].
 func linear(in *node, out_dim int) (*node, *node, *node) {
 	l_weight := weight(out_dim, in.l)
 	bias := weight(in.l2, out_dim)
 	in_times_weight := matmul(l_weight, in, l_weight.l2, l_weight.l)
-	//the below layer is a test, remove it and uncomment the other 2
-	// plus_bias := matmul(l_weight, in, l_weight.l2, l_weight.l)
 	plus_bias := add(in_times_weight, bias, bias.tensor.l2, bias.tensor.l)
 	return plus_bias, l_weight, bias
 }
 
+// Log Softmax layer
 func log_softmax(in *node, target *node) *node {
 	zero_grad := ones(in.tensor.l2, in.tensor.l)
 	data := zeros(in.tensor.l2, in.tensor.l)
@@ -257,7 +252,7 @@ func log_softmax(in *node, target *node) *node {
 
 //  ----------------------------------- LOSS AND OPTIM:  -----------------------------------
 
-// takes prediction tensor and target tensor as inputs, returns loss and gradients
+// Negative Log Likelihood. Takes prediction tensor and target tensor as inputs, returns loss and gradients
 func nll_loss(pred *tensor, target *tensor, gradients *tensor) float64 {
 	loss := 0.
 	grad := gradients
@@ -274,6 +269,7 @@ func nll_loss(pred *tensor, target *tensor, gradients *tensor) float64 {
 	return loss
 }
 
+// Least Squares loss
 func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
 	loss := 0.
 	grad := ones(pred.l2, pred.l)
@@ -298,14 +294,14 @@ type adam_init struct {
 	prev_m2s []*tensor
 }
 
-// adam step function
+// Adam Optimizer Step function
 func adam(weights []*node, init adam_init, bsz int) {
 	// parameters: would normally get these from adam_init
-	alpha := init.alpha
 	b1 := 0.9
 	b2 := 0.999
 	epsilon := math.Pow(10, -8)
 	// ------------
+	alpha := init.alpha
 	t := init.t
 	for k, w := range weights {
 		if !w.require_grad {
@@ -319,15 +315,15 @@ func adam(weights []*node, init adam_init, bsz int) {
 			prev_m1_layer := *prev_m1.data[i]
 			prev_m2_layer := *prev_m2.data[i]
 			for j := 0; j < w.l; j++ {
-				grad_layer[j] = grad_layer[j] / float64(bsz)
-				// gradient clipping
+				grad_layer[j] = grad_layer[j] / float64(bsz) // get mean gradient of batch
+				//-gradient--clipping-
 				if grad_layer[j] > 1. {
 					grad_layer[j] = 1.
 				}
 				if grad_layer[j] < -1. {
 					grad_layer[j] = -1.
 				}
-
+				//-------------------
 				m1 := prev_m1_layer[j]
 				m2 := prev_m2_layer[j]
 				biased_m1 := (m1 * b1) + ((1. - b1) * grad_layer[j])
@@ -345,7 +341,7 @@ func adam(weights []*node, init adam_init, bsz int) {
 	init.t += 1
 }
 
-// basic grad descent
+// Basic grad descent step
 func simple_step(weights []*node, init adam_init) {
 	alpha := init.alpha
 	for _, w := range weights {
@@ -366,6 +362,8 @@ func simple_step(weights []*node, init adam_init) {
 // ----------------------------------- FORWARD AND BACKWARD: -----------------------------------
 
 // would probably be more efficient for one data tensor to get passed thru forward instead of each node having its own data tensor.
+
+// Forward Pass function. Recursively finds leaf nodes and gets their values, then performs calculations at each node until it gets back to the root (the output layer).
 func forward(root *node) *tensor {
 	if root.op == "leaf" {
 		return root.tensor
@@ -445,12 +443,6 @@ func forward(root *node) *tensor {
 			data_layer := *root.tensor.data[i]
 			layer_sum := 0.
 			for j := 0; j < a.l; j++ {
-				// if a_layer[j] > 700. {
-				// 	a_layer[j] = 700.
-				// }
-				// if a_layer[j] < -700. {
-				// 	a_layer[j] = -700.
-				// }
 				layer_sum += math.Exp(a_layer[j])
 			}
 			for j := 0; j < a.l; j++ {
@@ -458,20 +450,10 @@ func forward(root *node) *tensor {
 			}
 		}
 	}
-
-	// pt(root.tensor, root.op)
-	// fmt.Println("--------------------------------------")
-	// fmt.Println("")
-
-	// test := *root.tensor.data[0]
-	// if math.IsNaN(test[0]) {
-	// 	fmt.Println("HALT")
-	// 	os.Exit(0)
-	// }
-
 	return root.tensor
 }
 
+// Back Propagation function. Recursively calculates gradients of loss function using chain rule. If zero_grad is true, will set all gradients to zero.
 func backward(root *node, zero_grad bool) {
 	if zero_grad {
 		if root.left != nil {
@@ -568,9 +550,10 @@ func backward(root *node, zero_grad bool) {
 
 // ----------------------------------- TESTING (will be removed when done) -----------------------------------
 
-func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
-	x_node := leaf(x, false)
-	y_node := leaf(y, false)
+// Example of a Neural Network constructor. Returns output layer node, slice of all parameter leaf nodes, input node, and target node.
+func _simple() (*node, []*node, *node, *node) {
+	x_node := leaf(nil, false)
+	y_node := leaf(nil, false)
 
 	// NN:
 	l1, l1_weight, l1_bias := linear(x_node, 784) // 784
@@ -590,8 +573,8 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 
 // simple neural net
 func Simple() {
-	num_batches := 51200 //10240
-	batch_size := 1
+	num_batches := 51200
+	batch_size := 64
 	num_epochs := 100
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
@@ -613,8 +596,8 @@ func Simple() {
 	test_y := make([]*tensor, num_batches/10.+1) // 1000
 	data_index := 5
 	for batch := range train_x {
-		x := init_weights(batch_size, 784)
-		y := zeros(batch_size, 10)
+		x := init_weights(1, 784)
+		y := zeros(1, 10)
 		for i := range x.data {
 			x_layer := *x.data[i]
 			y_layer := *y.data[i]
@@ -630,8 +613,8 @@ func Simple() {
 		train_y[batch] = &y
 	}
 	for batch := range test_x {
-		x := init_weights(batch_size, 784)
-		y := zeros(batch_size, 10)
+		x := init_weights(1, 784)
+		y := zeros(1, 10)
 		for i := range x.data {
 			x_layer := *x.data[i]
 			y_layer := *y.data[i]
@@ -647,26 +630,9 @@ func Simple() {
 		test_y[batch] = &y
 	}
 
-	// train_x := make([]*tensor, num_batches) // 1000
-	// train_y := make([]*tensor, num_batches) // 1000
-	// batch_size := 10
-	// for batch := range train_x {
-	// 	x := init_weights(batch_size, 1)
-	// 	y := zeros(batch_size, 1)
-	// 	for i := range x.data {
-	// 		x_layer := *x.data[i]
-	// 		y_layer := *y.data[i]
-	// 		y_layer[0] = 5*x_layer[0] + 11 // 2*math.Pow(x_layer[0], 2) +
-	// 	}
-	// 	train_x[batch] = &x
-	// 	train_y[batch] = &y
-	// }
-
-	x := train_x[0]
-	y := train_y[0]
 	best_loss := 999999999.
-	loss_list := make([]float64, num_epochs) // 10
-	sm, params, x_node, y_node := _simple(x, y)
+	loss_list := make([]float64, num_epochs)
+	sm, params, x_node, y_node := _simple()
 	prev_m1s := make([]*tensor, len(params))
 	prev_m2s := make([]*tensor, len(params))
 	for i, x := range params {
@@ -675,8 +641,8 @@ func Simple() {
 		prev_m1s[i] = &prev1
 		prev_m2s[i] = &prev2
 	}
-	lr := 0.000005                              // 0.000001
-	opt := adam_init{0, 0., prev_m1s, prev_m2s} // replace second parameter with lr if the learning rate scheduler doesnt work
+	lr := 0.00001 // 0.000005
+	opt := adam_init{0, 0., prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
 	for epoch := range loss_list {
 		total_loss := 0.
@@ -684,12 +650,9 @@ func Simple() {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
 			pred := forward(sm)
-
-			// loss, grads := least_squares_loss(pred, y_node.tensor)
-
 			loss := 0.
 			// minibatching
-			if (batch+1)%64 == 0 {
+			if (batch+1)%batch_size == 0 {
 				zero_grad := zeros(sm.grad.l2, sm.grad.l)
 				sm.grad = &zero_grad
 				loss = nll_loss(pred, y_node.tensor, sm.grad)
@@ -702,48 +665,26 @@ func Simple() {
 			loss = loss / float64(batch_size)
 			total_loss += loss
 
-			// simple_step(params, opt)
-
-			// pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
-			// pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
-			// fmt.Println("batch loss: ", loss)
-
 			if batch == num_batches-1 {
-				// pt(x_node.tensor, "epoch "+strconv.Itoa(epoch)+" input")
 				pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
 				pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
-				// pt(params[0].grad, "epoch "+strconv.Itoa(epoch)+" grad")
-				// for i, p := range params {
-				// 	pt(p.tensor, "param "+strconv.Itoa(i))
-				// 	pt(p.grad, "grad "+strconv.Itoa(i))
-				// }
 			}
-
-			// fmt.Println(epoch, " | ", batch, " | ", loss/float64(batch_size))
-
-			// fmt.Println("  sm:  ", *sm.tensor.data[0])
-			// fmt.Println("loss:  ", loss)
-
-			// expprobs := []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-			// lay := *pred.data[0]
-			// for i := range expprobs {
-			// 	expprobs[i] = int(100 * math.Exp(lay[i]))
-			// }
-			// fmt.Println("     ", *y.data[0], expprobs)
-			// loss_list[epoch] = loss
-
 		}
-		// LR SCHEDULER (untested)
+		// LR SCHEDULER
 		if epoch < num_epochs/10 {
 			opt.alpha = opt.alpha + lr/float64(num_epochs/10)
 		} else {
 			opt.alpha = opt.alpha - lr/float64(9*num_epochs/10)
 		}
+
 		total_loss = total_loss / (float64(num_batches))
 		fmt.Println(epoch, " | ", total_loss, " | ", time.Now())
-		// if total_loss > best_loss {
-		// 	break
-		// }
+
+		// Adaptive LR to prevent plateaus
+		if total_loss > best_loss {
+			opt.alpha = opt.alpha * 0.3
+		}
+
 		if total_loss < best_loss {
 			best_loss = total_loss
 		}
@@ -776,96 +717,9 @@ func Simple() {
 			}
 		}
 		fmt.Println("y value: ", y_num, " | prediction: ", pred_num)
-
-		// if len(test_x)-batch < 5 {
-		// 	pt_exp(pred, " pred")
-		// 	pt(y_node.tensor, " y")
-		// 	fmt.Println("===================================")
-		// }
 		loss := nll_loss(pred, y_node.tensor, sm.grad)
 		loss = loss / float64(batch_size)
 		total_loss += loss
 	}
 	fmt.Println("Validation Data", " | ", total_loss/(float64(len(test_x))))
-}
-
-// Proxy for main() so I can do test runs
-func Run() {
-	// t1_0 := []float64{0., 1.}
-	// t1_1 := []float64{2., 3.}
-	// t2_0 := []float64{4., 5.}
-	// t2_1 := []float64{6., 7.}
-	// t1 := tensor{[]*[]float64{&t1_0, &t1_1}, 2, 2}
-	// t2 := tensor{[]*[]float64{&t2_0, &t2_1}, 2, 2}
-	// t1_l := leaf(&t1, true)
-	// t2_l := leaf(&t2, true)
-	// tmm := matmul(t1_l, t2_l, 2, 2)
-	// fmt.Println("result: ")
-	// pt(forward(tmm))
-	// backward(tmm)
-	// fmt.Println("")
-	// fmt.Println("grad t1: ")
-	// pt(t1_l.grad)
-	// fmt.Println("")
-	// fmt.Println("grad t2: ")
-	// pt(t2_l.grad)
-
-	// loss, grad := nll_loss(&t1, &t2)
-	// fmt.Println(loss)
-	// pt(grad, "grad")
-	// 	os.Exit(0)
-
-	// x_2 := []float64{2., -2., 4., 2., 0., 4.}
-	// x_0 := []float64{2., -9., 7., 2., -2., 1.}
-	// x_1 := []float64{3., 0., 0., 2., 0., 1.}
-	// x := tensor{[]*[]float64{&x_0, &x_1, &x_2}, 3, 6}
-	// a_0 := []float64{1., -2., 3., 1., -2., 3.}
-	// a_1 := []float64{-4., 5., 6., -4., 5., 6.}
-	// a_2 := []float64{7., -8., -9., 7., -8., -9.}
-	// a_3 := []float64{1., -2., 3., 1., -2., 3.}
-	// a_4 := []float64{-4., 5., 6., -4., 5., 6.}
-	// a_5 := []float64{7., -8., -9., 7., -8., -9.}
-	// a := tensor{[]*[]float64{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
-	// b_0 := []float64{3., 2., 1., 3., 2., 1.}
-	// b_1 := []float64{2., 2., 1., 4., 2., 1.}
-	// b_2 := []float64{2., 2., 1., 0., 2., 0.}
-	// b := tensor{[]*[]float64{&b_0, &b_1, &b_2}, 3, 6}
-	// x_l := leaf(&x, true)
-	// a_l := leaf(&a, true)
-	// b_l := leaf(&b, true)
-	// comp_lookup := map[string]*node{}
-	// drop := dropout(a_l, a_l.l2, a_l.l, 0.4)
-	// a_x := matmul(drop, x_l, 6, 6)
-	// // rel := relu(a_x, a_x.tensor.l2, a_x.tensor.l)
-	// comp_graph := add(a_x, b_l, 3, 6)
-	// comp_lookup["x"] = x_l
-	// comp_lookup["a"] = a_l
-	// comp_lookup["b"] = b_l
-	// fmt.Println("Inputs:")
-	// fmt.Println("x: ", *x.data[0])
-	// fmt.Println("A: ")
-	//
-	//	for i := 0; i < 6; i++ {
-	//		fmt.Println(*a.data[i])
-	//	}
-	//
-	// fmt.Println("b: ", *b.data[0])
-	// fmt.Println("")
-	// fmt.Println("Output:")
-	// fmt.Println("linear 2 = ", *forward(comp_graph).data[0])
-	// backward(comp_graph, true)
-	// fmt.Println("")
-	// fmt.Println("Gradients: ")
-	// // fmt.Println("add: ", comp_lookup["add"].grad.data)
-	// // fmt.Println("mul: ", comp_lookup["mul"].grad.data)
-	// x_grad := *comp_lookup["x"].grad.data[0]
-	// fmt.Println("x: ", x_grad)
-	// fmt.Println("A: ")
-	//
-	//	for i := 0; i < 6; i++ {
-	//		fmt.Println(*comp_lookup["a"].grad.data[i])
-	//	}
-	//
-	// b_grad := *comp_lookup["b"].grad.data[0]
-	// fmt.Println("b: ", b_grad)
 }

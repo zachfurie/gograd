@@ -13,5 +13,4 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	fmt.Println("------------------------------------------------------------------------")
 	gograd_2d.Simple()
-	// gograd_2d.Run()
 }
