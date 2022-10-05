@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
 	// "log"
 	"math"
@@ -81,6 +82,7 @@ func ones(l2 int, l int) tensor {
 }
 
 func init_weights(l2 int, l int) tensor {
+	// Initializing for ReLU: https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
 	std := math.Sqrt(2. / float64(l))
 	zero_grad_pts := make([]*[]float64, l2)
 	for i := range zero_grad_pts {
@@ -256,20 +258,20 @@ func log_softmax(in *node, target *node) *node {
 //  ----------------------------------- LOSS AND OPTIM:  -----------------------------------
 
 // takes prediction tensor and target tensor as inputs, returns loss and gradients
-func nll_loss(pred *tensor, target *tensor) (float64, *tensor) {
+func nll_loss(pred *tensor, target *tensor, gradients *tensor) float64 {
 	loss := 0.
-	grad := ones(pred.l2, pred.l)
+	grad := gradients
 	for j := range target.data {
 		grad_layer := *grad.data[j]
 		target_layer := *target.data[j]
 		pred_layer := *pred.data[j]
 		for i, t := range target_layer {
 			loss -= t * pred_layer[i]
-			grad_layer[i] = -t
+			grad_layer[i] -= t
 		}
 	}
 
-	return loss, &grad
+	return loss
 }
 
 func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
@@ -297,7 +299,7 @@ type adam_init struct {
 }
 
 // adam step function
-func adam(weights []*node, init adam_init) {
+func adam(weights []*node, init adam_init, bsz int) {
 	// parameters: would normally get these from adam_init
 	alpha := init.alpha
 	b1 := 0.9
@@ -317,6 +319,7 @@ func adam(weights []*node, init adam_init) {
 			prev_m1_layer := *prev_m1.data[i]
 			prev_m2_layer := *prev_m2.data[i]
 			for j := 0; j < w.l; j++ {
+				grad_layer[j] = grad_layer[j] / float64(bsz)
 				// gradient clipping
 				if grad_layer[j] > 1. {
 					grad_layer[j] = 1.
@@ -469,14 +472,16 @@ func forward(root *node) *tensor {
 	return root.tensor
 }
 
-func backward(root *node) {
-	if root.left != nil {
-		zeroed_data := zeros(root.left.grad.l2, root.left.grad.l)
-		root.left.grad = &zeroed_data
-	}
-	if root.right != nil {
-		zeroed_data := zeros(root.right.grad.l2, root.right.grad.l)
-		root.right.grad = &zeroed_data
+func backward(root *node, zero_grad bool) {
+	if zero_grad {
+		if root.left != nil {
+			zeroed_data := zeros(root.left.grad.l2, root.left.grad.l)
+			root.left.grad = &zeroed_data
+		}
+		if root.right != nil {
+			zeroed_data := zeros(root.right.grad.l2, root.right.grad.l)
+			root.right.grad = &zeroed_data
+		}
 	}
 	if !root.require_grad {
 		return
@@ -484,8 +489,8 @@ func backward(root *node) {
 		// Chain rule for a + b
 		root.left.grad = root.grad
 		root.right.grad = root.grad
-		backward(root.left)
-		backward(root.right)
+		backward(root.left, zero_grad)
+		backward(root.right, zero_grad)
 	} else if root.op == "*" { // mul()
 		// Chain rule for a * b
 		data1 := zeros(root.l2, root.l)
@@ -509,8 +514,8 @@ func backward(root *node) {
 			}
 		}
 		root.right.grad = &data2
-		backward(root.left)
-		backward(root.right)
+		backward(root.left, zero_grad)
+		backward(root.right, zero_grad)
 	} else if root.op == "mm" { // matmul()
 		// gradient should be m x n * n x p -> m x p
 		// a = root.left
@@ -532,8 +537,8 @@ func backward(root *node) {
 				}
 			}
 		}
-		backward(root.left)
-		backward(root.right)
+		backward(root.left, zero_grad)
+		backward(root.right, zero_grad)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
@@ -547,7 +552,7 @@ func backward(root *node) {
 			}
 		}
 		root.left.grad = &data1
-		backward(root.left)
+		backward(root.left, zero_grad)
 	} else if root.op == "sm" {
 		for i := 0; i < root.tensor.l2; i++ {
 			grad_layer := *root.grad.data[i]
@@ -557,7 +562,7 @@ func backward(root *node) {
 				ret_layer[j] = (1. - data_layer[j]) * grad_layer[j]
 			}
 		}
-		backward(root.left)
+		backward(root.left, zero_grad)
 	}
 }
 
@@ -568,26 +573,28 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 784)
-	rel1 := relu(l1, x_node.tensor.l2, 784)
-	l2, l2_weight, l2_bias := linear(rel1, 128) //256
-	rel2 := relu(l2, x_node.tensor.l2, 128)     //256
-	l3, l3_weight, l3_bias := linear(rel2, 10)  //128
+	l1, l1_weight, l1_bias := linear(x_node, 784) // 784
+	rel1 := relu(l1, x_node.tensor.l2, 784)       // 784
+	l2, l2_weight, l2_bias := linear(rel1, 10)    // 256
+	// rel2 := relu(l2, x_node.tensor.l2, 64)     // 256
+	// l3, l3_weight, l3_bias := linear(rel2, 10) // 128
 	// rel3 := relu(l3, x_node.tensor.l2, 128)
 	// l4, l4_weight, l4_bias := linear(rel3, 10)
-	sm := log_softmax(l3, y_node)
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias} //, l4_weight, l4_bias}
+	sm := log_softmax(l2, y_node)
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 
 	return sm, params, x_node, y_node
 }
 
 // simple neural net
 func Simple() {
-	num_batches := 10
-	batch_size := 64
-	num_epochs := 1000
+	num_batches := 51200 //10240
+	batch_size := 1
+	num_epochs := 100
 
-	// Read Data
+	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
 	f, err := os.Open("mnist_train.csv")
 	if err != nil {
 		log.Fatal(err)
@@ -668,7 +675,7 @@ func Simple() {
 		prev_m1s[i] = &prev1
 		prev_m2s[i] = &prev2
 	}
-	lr := 0.00001
+	lr := 0.000005                              // 0.000001
 	opt := adam_init{0, 0., prev_m1s, prev_m2s} // replace second parameter with lr if the learning rate scheduler doesnt work
 	fmt.Println("======= START TRAINING ======")
 	for epoch := range loss_list {
@@ -677,23 +684,25 @@ func Simple() {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
 			pred := forward(sm)
-			loss, grads := nll_loss(pred, y_node.tensor)
+
 			// loss, grads := least_squares_loss(pred, y_node.tensor)
 
+			loss := 0.
+			// minibatching
+			if (batch+1)%64 == 0 {
+				zero_grad := zeros(sm.grad.l2, sm.grad.l)
+				sm.grad = &zero_grad
+				loss = nll_loss(pred, y_node.tensor, sm.grad)
+				backward(sm, true)
+				adam(params, opt, batch_size)
+			} else {
+				loss = nll_loss(pred, y_node.tensor, sm.grad)
+				backward(sm, false)
+			}
 			loss = loss / float64(batch_size)
 			total_loss += loss
 
-			sm.grad = grads
-			backward(sm)
-			adam(params, opt)
 			// simple_step(params, opt)
-
-			// LR SCHEDULER (untested)
-			if epoch < num_epochs/10 {
-				opt.alpha = opt.alpha + lr/float64(num_epochs/10)
-			} else {
-				opt.alpha = opt.alpha - lr/float64(num_epochs)
-			}
 
 			// pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
 			// pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
@@ -724,11 +733,17 @@ func Simple() {
 			// loss_list[epoch] = loss
 
 		}
-		total_loss = total_loss / (float64(num_batches))
-		fmt.Println(epoch, " | ", total_loss)
-		if total_loss > best_loss {
-			break
+		// LR SCHEDULER (untested)
+		if epoch < num_epochs/10 {
+			opt.alpha = opt.alpha + lr/float64(num_epochs/10)
+		} else {
+			opt.alpha = opt.alpha - lr/float64(9*num_epochs/10)
 		}
+		total_loss = total_loss / (float64(num_batches))
+		fmt.Println(epoch, " | ", total_loss, " | ", time.Now())
+		// if total_loss > best_loss {
+		// 	break
+		// }
 		if total_loss < best_loss {
 			best_loss = total_loss
 		}
@@ -740,12 +755,34 @@ func Simple() {
 		x_node.tensor = test_x[batch]
 		y_node.tensor = test_y[batch]
 		pred := forward(sm)
-		if batch == len(test_x)-1 {
-			fmt.Println("===================================")
-			pt_exp(pred, " pred")
-			pt(y, " y")
+
+		// get max of pred
+		pred_layer := *pred.data[0]
+		pred_max := 0.
+		pred_num := -1
+		for i, p := range pred_layer {
+			pp := math.Exp(p)
+			if pp > pred_max {
+				pred_max = pp
+				pred_num = i
+			}
 		}
-		loss, _ := nll_loss(pred, y_node.tensor)
+		y_layer := *y_node.tensor.data[0]
+		y_num := -1
+		for i, p := range y_layer {
+			if p > 0 {
+				y_num = i
+				break
+			}
+		}
+		fmt.Println("y value: ", y_num, " | prediction: ", pred_num)
+
+		// if len(test_x)-batch < 5 {
+		// 	pt_exp(pred, " pred")
+		// 	pt(y_node.tensor, " y")
+		// 	fmt.Println("===================================")
+		// }
+		loss := nll_loss(pred, y_node.tensor, sm.grad)
 		loss = loss / float64(batch_size)
 		total_loss += loss
 	}
@@ -754,12 +791,12 @@ func Simple() {
 
 // Proxy for main() so I can do test runs
 func Run() {
-	t1_0 := []float64{0., 1.}
-	t1_1 := []float64{2., 3.}
-	t2_0 := []float64{4., 5.}
-	t2_1 := []float64{6., 7.}
-	t1 := tensor{[]*[]float64{&t1_0, &t1_1}, 2, 2}
-	t2 := tensor{[]*[]float64{&t2_0, &t2_1}, 2, 2}
+	// t1_0 := []float64{0., 1.}
+	// t1_1 := []float64{2., 3.}
+	// t2_0 := []float64{4., 5.}
+	// t2_1 := []float64{6., 7.}
+	// t1 := tensor{[]*[]float64{&t1_0, &t1_1}, 2, 2}
+	// t2 := tensor{[]*[]float64{&t2_0, &t2_1}, 2, 2}
 	// t1_l := leaf(&t1, true)
 	// t2_l := leaf(&t2, true)
 	// tmm := matmul(t1_l, t2_l, 2, 2)
@@ -773,58 +810,62 @@ func Run() {
 	// fmt.Println("grad t2: ")
 	// pt(t2_l.grad)
 
-	loss, grad := nll_loss(&t1, &t2)
-	fmt.Println(loss)
-	pt(grad, "grad")
-	os.Exit(0)
+	// loss, grad := nll_loss(&t1, &t2)
+	// fmt.Println(loss)
+	// pt(grad, "grad")
+	// 	os.Exit(0)
 
-	x_2 := []float64{2., -2., 4., 2., 0., 4.}
-	x_0 := []float64{2., -9., 7., 2., -2., 1.}
-	x_1 := []float64{3., 0., 0., 2., 0., 1.}
-	x := tensor{[]*[]float64{&x_0, &x_1, &x_2}, 3, 6}
-	a_0 := []float64{1., -2., 3., 1., -2., 3.}
-	a_1 := []float64{-4., 5., 6., -4., 5., 6.}
-	a_2 := []float64{7., -8., -9., 7., -8., -9.}
-	a_3 := []float64{1., -2., 3., 1., -2., 3.}
-	a_4 := []float64{-4., 5., 6., -4., 5., 6.}
-	a_5 := []float64{7., -8., -9., 7., -8., -9.}
-	a := tensor{[]*[]float64{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
-	b_0 := []float64{3., 2., 1., 3., 2., 1.}
-	b_1 := []float64{2., 2., 1., 4., 2., 1.}
-	b_2 := []float64{2., 2., 1., 0., 2., 0.}
-	b := tensor{[]*[]float64{&b_0, &b_1, &b_2}, 3, 6}
-	x_l := leaf(&x, true)
-	a_l := leaf(&a, true)
-	b_l := leaf(&b, true)
-	comp_lookup := map[string]*node{}
-	drop := dropout(a_l, a_l.l2, a_l.l, 0.4)
-	a_x := matmul(drop, x_l, 6, 6)
-	// rel := relu(a_x, a_x.tensor.l2, a_x.tensor.l)
-	comp_graph := add(a_x, b_l, 3, 6)
-	comp_lookup["x"] = x_l
-	comp_lookup["a"] = a_l
-	comp_lookup["b"] = b_l
-	fmt.Println("Inputs:")
-	fmt.Println("x: ", *x.data[0])
-	fmt.Println("A: ")
-	for i := 0; i < 6; i++ {
-		fmt.Println(*a.data[i])
-	}
-	fmt.Println("b: ", *b.data[0])
-	fmt.Println("")
-	fmt.Println("Output:")
-	fmt.Println("linear 2 = ", *forward(comp_graph).data[0])
-	backward(comp_graph)
-	fmt.Println("")
-	fmt.Println("Gradients: ")
-	// fmt.Println("add: ", comp_lookup["add"].grad.data)
-	// fmt.Println("mul: ", comp_lookup["mul"].grad.data)
-	x_grad := *comp_lookup["x"].grad.data[0]
-	fmt.Println("x: ", x_grad)
-	fmt.Println("A: ")
-	for i := 0; i < 6; i++ {
-		fmt.Println(*comp_lookup["a"].grad.data[i])
-	}
-	b_grad := *comp_lookup["b"].grad.data[0]
-	fmt.Println("b: ", b_grad)
+	// x_2 := []float64{2., -2., 4., 2., 0., 4.}
+	// x_0 := []float64{2., -9., 7., 2., -2., 1.}
+	// x_1 := []float64{3., 0., 0., 2., 0., 1.}
+	// x := tensor{[]*[]float64{&x_0, &x_1, &x_2}, 3, 6}
+	// a_0 := []float64{1., -2., 3., 1., -2., 3.}
+	// a_1 := []float64{-4., 5., 6., -4., 5., 6.}
+	// a_2 := []float64{7., -8., -9., 7., -8., -9.}
+	// a_3 := []float64{1., -2., 3., 1., -2., 3.}
+	// a_4 := []float64{-4., 5., 6., -4., 5., 6.}
+	// a_5 := []float64{7., -8., -9., 7., -8., -9.}
+	// a := tensor{[]*[]float64{&a_0, &a_1, &a_2, &a_3, &a_4, &a_5}, 6, 6}
+	// b_0 := []float64{3., 2., 1., 3., 2., 1.}
+	// b_1 := []float64{2., 2., 1., 4., 2., 1.}
+	// b_2 := []float64{2., 2., 1., 0., 2., 0.}
+	// b := tensor{[]*[]float64{&b_0, &b_1, &b_2}, 3, 6}
+	// x_l := leaf(&x, true)
+	// a_l := leaf(&a, true)
+	// b_l := leaf(&b, true)
+	// comp_lookup := map[string]*node{}
+	// drop := dropout(a_l, a_l.l2, a_l.l, 0.4)
+	// a_x := matmul(drop, x_l, 6, 6)
+	// // rel := relu(a_x, a_x.tensor.l2, a_x.tensor.l)
+	// comp_graph := add(a_x, b_l, 3, 6)
+	// comp_lookup["x"] = x_l
+	// comp_lookup["a"] = a_l
+	// comp_lookup["b"] = b_l
+	// fmt.Println("Inputs:")
+	// fmt.Println("x: ", *x.data[0])
+	// fmt.Println("A: ")
+	//
+	//	for i := 0; i < 6; i++ {
+	//		fmt.Println(*a.data[i])
+	//	}
+	//
+	// fmt.Println("b: ", *b.data[0])
+	// fmt.Println("")
+	// fmt.Println("Output:")
+	// fmt.Println("linear 2 = ", *forward(comp_graph).data[0])
+	// backward(comp_graph, true)
+	// fmt.Println("")
+	// fmt.Println("Gradients: ")
+	// // fmt.Println("add: ", comp_lookup["add"].grad.data)
+	// // fmt.Println("mul: ", comp_lookup["mul"].grad.data)
+	// x_grad := *comp_lookup["x"].grad.data[0]
+	// fmt.Println("x: ", x_grad)
+	// fmt.Println("A: ")
+	//
+	//	for i := 0; i < 6; i++ {
+	//		fmt.Println(*comp_lookup["a"].grad.data[i])
+	//	}
+	//
+	// b_grad := *comp_lookup["b"].grad.data[0]
+	// fmt.Println("b: ", b_grad)
 }
