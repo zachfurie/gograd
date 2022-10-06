@@ -47,6 +47,13 @@ type tensornd struct {
 }
 
 // Will be implementing an alternative tensor design which uses a single slice instead of slices of pointers of slices of pointers of...
+type tensor1s struct {
+	data   []float64 // all tensor data in a single slice
+	dimlen []int     // [i] = length of dimension i
+	diminc []int     // [i] = increment of dimension i
+	l      int       // = len(data)
+	dims   int       // = len(dimlen)  = len(diminc)
+}
 
 //  ----------------------------------- Auxiliary Functions:  -----------------------------------
 
@@ -169,6 +176,39 @@ func pt_exp(t *tensor, name string) {
 		fmt.Println(i, ": ", exp_layer)
 	}
 	fmt.Println("-----]")
+}
+
+func copy_tens(t *tensor) *tensor {
+	copy_t := zeros(t.l2, t.l)
+	for x := range t.data {
+		layer := *t.data[x]
+		copy_layer := *copy_t.data[x]
+		copy(copy_layer, layer)
+		// for y := range layer {
+		// 	copy_layer[y] = layer[y]
+		// }
+	}
+	return &copy_t
+}
+
+func zero_gradients(batch_gradients []*tensor) {
+	for i, t := range batch_gradients {
+		zero_grad := zeros(t.l2, t.l)
+		batch_gradients[i] = &zero_grad
+	}
+}
+
+func add_same_size(t1 *tensor, t2 *tensor) *tensor {
+	ret := zeros(t1.l2, t1.l)
+	for i := range ret.data {
+		t0d := *ret.data[i]
+		t1d := *t1.data[i]
+		t2d := *t2.data[i]
+		for j := range t0d {
+			t0d[j] = t1d[j] + t2d[j]
+		}
+	}
+	return &ret
 }
 
 //  ----------------------------------- BASIC OPS:  -----------------------------------
@@ -301,8 +341,9 @@ func adam(weights []*node, init adam_init, bsz int) {
 	b2 := 0.999
 	epsilon := math.Pow(10, -8)
 	// ------------
-	alpha := init.alpha
+	init.t += 1
 	t := init.t
+	alpha := init.alpha * math.Sqrt((1. - math.Pow(b2, t))) / (1. - math.Pow(b1, t))
 	for k, w := range weights {
 		if !w.require_grad {
 			continue
@@ -328,17 +369,20 @@ func adam(weights []*node, init adam_init, bsz int) {
 				m2 := prev_m2_layer[j]
 				biased_m1 := (m1 * b1) + ((1. - b1) * grad_layer[j])
 				biased_m2 := (m2 * b2) + ((1. - b2) * math.Pow(grad_layer[j], 2.))
-				m1 = biased_m1 / math.Pow(b1, t)
-				m2 = biased_m2 / math.Pow(b2, t)
+
+				// m1 = biased_m1 / (1. - math.Pow(b1, t))
+				// m2 = biased_m2 / (1. - math.Pow(b2, t))
+				m1 = biased_m1
+				m2 = biased_m2
+
 				data_layer[j] = data_layer[j] - (alpha * m1 / (math.Sqrt(m2) + epsilon))
 				prev_m1_layer[j] = m1
 				prev_m2_layer[j] = m2
 			}
-			prev_m1.data[i] = &prev_m1_layer
-			prev_m2.data[i] = &prev_m2_layer
+			// prev_m1.data[i] = &prev_m1_layer
+			// prev_m2.data[i] = &prev_m2_layer
 		}
 	}
-	init.t += 1
 }
 
 // Basic grad descent step
@@ -454,16 +498,14 @@ func forward(root *node) *tensor {
 }
 
 // Back Propagation function. Recursively calculates gradients of loss function using chain rule. If zero_grad is true, will set all gradients to zero.
-func backward(root *node, zero_grad bool) {
-	if zero_grad {
-		if root.left != nil {
-			zeroed_data := zeros(root.left.grad.l2, root.left.grad.l)
-			root.left.grad = &zeroed_data
-		}
-		if root.right != nil {
-			zeroed_data := zeros(root.right.grad.l2, root.right.grad.l)
-			root.right.grad = &zeroed_data
-		}
+func backward(root *node) {
+	if root.left != nil {
+		zeroed_data := zeros(root.left.grad.l2, root.left.grad.l)
+		root.left.grad = &zeroed_data
+	}
+	if root.right != nil {
+		zeroed_data := zeros(root.right.grad.l2, root.right.grad.l)
+		root.right.grad = &zeroed_data
 	}
 	if !root.require_grad {
 		return
@@ -471,33 +513,28 @@ func backward(root *node, zero_grad bool) {
 		// Chain rule for a + b
 		root.left.grad = root.grad
 		root.right.grad = root.grad
-		backward(root.left, zero_grad)
-		backward(root.right, zero_grad)
+		backward(root.left)
+		backward(root.right)
 	} else if root.op == "*" { // mul()
 		// Chain rule for a * b
-		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
-			data_layer := *data1.data[i]
+			data_layer := *root.left.grad.data[i]
 			right_layer := *root.right.tensor.data[i]
 			grad_layer := *root.grad.data[i]
 			for j := 0; j < root.l; j++ {
 				data_layer[j] = right_layer[j] * grad_layer[j]
 			}
 		}
-		root.left.grad = &data1
-
-		data2 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
-			data_layer := *data2.data[i]
+			data_layer := *root.right.grad.data[i]
 			left_layer := *root.left.tensor.data[i]
 			grad_layer := *root.grad.data[i]
 			for j := 0; j < root.l; j++ {
 				data_layer[j] = left_layer[j] * grad_layer[j]
 			}
 		}
-		root.right.grad = &data2
-		backward(root.left, zero_grad)
-		backward(root.right, zero_grad)
+		backward(root.left)
+		backward(root.right)
 	} else if root.op == "mm" { // matmul()
 		// gradient should be m x n * n x p -> m x p
 		// a = root.left
@@ -514,13 +551,13 @@ func backward(root *node, zero_grad bool) {
 				left_data := *root.left.tensor.data[i]
 				right_data := *root.right.tensor.data[i2]
 				for j := 0; j < root.left.tensor.l; j++ {
-					left_layer[j] += right_data[j] * root_grad[i]
-					right_layer[j] += left_data[j] * root_grad[i]
+					left_layer[j] += right_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
+					right_layer[j] += left_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
 				}
 			}
 		}
-		backward(root.left, zero_grad)
-		backward(root.right, zero_grad)
+		backward(root.left)
+		backward(root.right)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
@@ -534,7 +571,7 @@ func backward(root *node, zero_grad bool) {
 			}
 		}
 		root.left.grad = &data1
-		backward(root.left, zero_grad)
+		backward(root.left)
 	} else if root.op == "sm" {
 		for i := 0; i < root.tensor.l2; i++ {
 			grad_layer := *root.grad.data[i]
@@ -544,23 +581,23 @@ func backward(root *node, zero_grad bool) {
 				ret_layer[j] = (1. - data_layer[j]) * grad_layer[j]
 			}
 		}
-		backward(root.left, zero_grad)
+		backward(root.left)
 	}
 }
 
 // ----------------------------------- TESTING (will be removed when done) -----------------------------------
 
 // Example of a Neural Network constructor. Returns output layer node, slice of all parameter leaf nodes, input node, and target node.
-func _simple() (*node, []*node, *node, *node) {
-	x_node := leaf(nil, false)
-	y_node := leaf(nil, false)
+func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
+	x_node := leaf(x, false)
+	y_node := leaf(y, false)
 
 	// NN:
 	l1, l1_weight, l1_bias := linear(x_node, 784) // 784
 	rel1 := relu(l1, x_node.tensor.l2, 784)       // 784
 	l2, l2_weight, l2_bias := linear(rel1, 10)    // 256
-	// rel2 := relu(l2, x_node.tensor.l2, 64)     // 256
-	// l3, l3_weight, l3_bias := linear(rel2, 10) // 128
+	// rel2 := relu(l2, x_node.tensor.l2, 128)       // 256
+	// l3, l3_weight, l3_bias := linear(rel2, 10)    // 128
 	// rel3 := relu(l3, x_node.tensor.l2, 128)
 	// l4, l4_weight, l4_bias := linear(rel3, 10)
 	sm := log_softmax(l2, y_node)
@@ -573,9 +610,11 @@ func _simple() (*node, []*node, *node, *node) {
 
 // simple neural net
 func Simple() {
-	num_batches := 51200
+	num_batches := 5120 // 51200 // not number of batches, actually just number of samples
 	batch_size := 64
 	num_epochs := 100
+	// Default learning rate is 0.001, but I have found smaller values to work better throughout my testing
+	lr := 0.0001 //0.00001 // 0.000005
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
 	f, err := os.Open("mnist_train.csv")
@@ -629,40 +668,59 @@ func Simple() {
 		test_x[batch] = &x
 		test_y[batch] = &y
 	}
-
-	best_loss := 999999999.
+	x := train_x[0]
+	y := train_x[0]
 	loss_list := make([]float64, num_epochs)
-	sm, params, x_node, y_node := _simple()
+	sm, params, x_node, y_node := _simple(x, y)
 	prev_m1s := make([]*tensor, len(params))
 	prev_m2s := make([]*tensor, len(params))
+	best_loss := 999999999.
+	best_epoch := -1
+	best_weights := make([]*tensor, len(params))
+	batch_gradients := make([]*tensor, len(params))
 	for i, x := range params {
 		prev1 := zeros(x.l2, x.l)
 		prev2 := zeros(x.l2, x.l)
+		bg := zeros(x.l2, x.l)
 		prev_m1s[i] = &prev1
 		prev_m2s[i] = &prev2
+		batch_gradients[i] = &bg
 	}
-	lr := 0.00001 // 0.000005
+
 	opt := adam_init{0, 0., prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
 	for epoch := range loss_list {
 		total_loss := 0.
+		// LR SCHEDULER
+		if epoch < num_epochs/10 {
+			opt.alpha = opt.alpha + lr/float64(num_epochs/10)
+		} else {
+			opt.alpha = opt.alpha - lr/float64(9*num_epochs/10)
+		}
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
 			pred := forward(sm)
 			loss := 0.
+
+			zero_grad := zeros(sm.grad.l2, sm.grad.l)
+			sm.grad = &zero_grad
+			loss = nll_loss(pred, y_node.tensor, sm.grad)
+			backward(sm)
+
 			// minibatching
 			if (batch+1)%batch_size == 0 {
-				zero_grad := zeros(sm.grad.l2, sm.grad.l)
-				sm.grad = &zero_grad
-				loss = nll_loss(pred, y_node.tensor, sm.grad)
-				backward(sm, true)
+				for i, x := range params {
+					x.grad = copy_tens(batch_gradients[i])
+					bg := zeros(x.l2, x.l)
+					batch_gradients[i] = &bg
+				}
 				adam(params, opt, batch_size)
 			} else {
-				loss = nll_loss(pred, y_node.tensor, sm.grad)
-				backward(sm, false)
+				for i, x := range params {
+					batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
+				}
 			}
-			loss = loss / float64(batch_size)
 			total_loss += loss
 
 			if batch == num_batches-1 {
@@ -670,15 +728,9 @@ func Simple() {
 				pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
 			}
 		}
-		// LR SCHEDULER
-		if epoch < num_epochs/10 {
-			opt.alpha = opt.alpha + lr/float64(num_epochs/10)
-		} else {
-			opt.alpha = opt.alpha - lr/float64(9*num_epochs/10)
-		}
 
 		total_loss = total_loss / (float64(num_batches))
-		fmt.Println(epoch, " | ", total_loss, " | ", time.Now())
+		fmt.Println(epoch, " | ", total_loss, " | ", float64(int(1000*math.Exp(-total_loss)))/1000., " | ", time.Now())
 
 		// Adaptive LR to prevent plateaus
 		if total_loss > best_loss {
@@ -687,10 +739,21 @@ func Simple() {
 
 		if total_loss < best_loss {
 			best_loss = total_loss
+			best_epoch = epoch
+			for i, pnode := range params {
+				best_weights[i] = copy_tens(pnode.tensor)
+			}
+
+			opt.alpha = opt.alpha * 1.1 // not sure this is a good idea, but seems like a decent way to speed up training
 		}
 	}
-	fmt.Println("BEST LOSS: ", best_loss)
+	fmt.Println("BEST LOSS: ", best_epoch, " | ", best_loss)
+	for i, pnode := range params {
+		pnode.tensor = best_weights[i]
+	}
 	total_loss := 0.
+	correct := 0
+	incorrect := 0
 	fmt.Println("====== VALIDATING ======")
 	for batch := range test_x {
 		x_node.tensor = test_x[batch]
@@ -716,10 +779,16 @@ func Simple() {
 				break
 			}
 		}
-		fmt.Println("y value: ", y_num, " | prediction: ", pred_num)
+		// fmt.Println("y value: ", y_num, " | prediction: ", pred_num)
+		if y_num == pred_num {
+			correct += 1
+		} else {
+			incorrect += 1
+		}
 		loss := nll_loss(pred, y_node.tensor, sm.grad)
-		loss = loss / float64(batch_size)
 		total_loss += loss
 	}
 	fmt.Println("Validation Data", " | ", total_loss/(float64(len(test_x))))
+	fmt.Println("Total correct:   ", correct)
+	fmt.Println("Total incorrect: ", incorrect)
 }
