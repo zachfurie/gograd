@@ -262,6 +262,14 @@ func relu(a *node, l2 int, l int) *node {
 	return &new_node
 }
 
+// Sigmoid layer
+func sigmoid(a *node, l2 int, l int) *node {
+	zero_grad := ones(l2, l)
+	data := zeros(l2, l)
+	new_node := node{a, nil, "sig", &data, &zero_grad, l2, l, true}
+	return &new_node
+}
+
 // Dropout layer
 func dropout(a *node, l2 int, l int, drop_prob float64) *node {
 	drop_prob_data := []float64{drop_prob}
@@ -344,6 +352,7 @@ func adam(weights []*node, init adam_init, bsz int) {
 	init.t += 1
 	t := init.t
 	alpha := init.alpha * math.Sqrt((1. - math.Pow(b2, t))) / (1. - math.Pow(b1, t))
+	// alpha := init.alpha
 	for k, w := range weights {
 		if !w.require_grad {
 			continue
@@ -358,11 +367,11 @@ func adam(weights []*node, init adam_init, bsz int) {
 			for j := 0; j < w.l; j++ {
 				grad_layer[j] = grad_layer[j] / float64(bsz) // get mean gradient of batch
 				//-gradient--clipping-
-				if grad_layer[j] > 1. {
-					grad_layer[j] = 1.
+				if grad_layer[j] > 1.0 {
+					grad_layer[j] = 1.0
 				}
-				if grad_layer[j] < -1. {
-					grad_layer[j] = -1.
+				if grad_layer[j] < -1.0 {
+					grad_layer[j] = -1.0
 				}
 				//-------------------
 				m1 := prev_m1_layer[j]
@@ -372,15 +381,13 @@ func adam(weights []*node, init adam_init, bsz int) {
 
 				// m1 = biased_m1 / (1. - math.Pow(b1, t))
 				// m2 = biased_m2 / (1. - math.Pow(b2, t))
-				m1 = biased_m1
-				m2 = biased_m2
+				// m1 = biased_m1
+				// m2 = biased_m2
 
-				data_layer[j] = data_layer[j] - (alpha * m1 / (math.Sqrt(m2) + epsilon))
-				prev_m1_layer[j] = m1
-				prev_m2_layer[j] = m2
+				data_layer[j] = data_layer[j] - (alpha * biased_m1 / (math.Sqrt(biased_m2) + epsilon))
+				prev_m1_layer[j] = biased_m1
+				prev_m2_layer[j] = biased_m2
 			}
-			// prev_m1.data[i] = &prev_m1_layer
-			// prev_m2.data[i] = &prev_m2_layer
 		}
 	}
 }
@@ -401,6 +408,11 @@ func simple_step(weights []*node, init adam_init) {
 		}
 	}
 	init.alpha = alpha * 0.9
+}
+
+// Exponential learning rate decay
+func exp_lr_decay(init adam_init, decay_rate float64, global_step int, decay_steps int) {
+	init.alpha = init.alpha * math.Pow(decay_rate, float64(global_step/decay_steps))
 }
 
 // ----------------------------------- FORWARD AND BACKWARD: -----------------------------------
@@ -493,6 +505,15 @@ func forward(root *node) *tensor {
 				data_layer[j] = a_layer[j] - math.Log(layer_sum)
 			}
 		}
+	} else if root.op == "sig" { // Sigmoid
+		a := forward(root.left)
+		for i := 0; i < a.l2; i++ {
+			a_layer := *a.data[i]
+			data_layer := *root.tensor.data[i]
+			for j := 0; j < a.l; j++ {
+				data_layer[j] = 1. / (1. + math.Exp((-1. * a_layer[j])))
+			}
+		}
 	}
 	return root.tensor
 }
@@ -511,8 +532,8 @@ func backward(root *node) {
 		return
 	} else if root.op == "+" { // add()
 		// Chain rule for a + b
-		root.left.grad = root.grad
-		root.right.grad = root.grad
+		root.left.grad = copy_tens(root.grad) // I dont think I should have to copy (instead could just assign the pointer), but trying this to be safe.
+		root.right.grad = copy_tens(root.grad)
 		backward(root.left)
 		backward(root.right)
 	} else if root.op == "*" { // mul()
@@ -582,6 +603,16 @@ func backward(root *node) {
 			}
 		}
 		backward(root.left)
+	} else if root.op == "sig" {
+		for i := 0; i < root.tensor.l2; i++ {
+			grad_layer := *root.grad.data[i]
+			data_layer := *root.tensor.data[i]
+			ret_layer := *root.left.grad.data[i]
+			for j := 0; j < root.tensor.l; j++ {
+				ret_layer[j] = data_layer[j] * (1. - data_layer[j]) * grad_layer[j]
+			}
+		}
+		backward(root.left)
 	}
 }
 
@@ -593,15 +624,16 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 784) // 784
-	rel1 := relu(l1, x_node.tensor.l2, 784)       // 784
-	l2, l2_weight, l2_bias := linear(rel1, 10)    // 256
+	l1, l1_weight, l1_bias := linear(x_node, 10) // 784
+	// rel1 := relu(l1, x_node.tensor.l2, 5)       // 784
+	// l2, l2_weight, l2_bias := linear(sl1, 10) // 256
 	// rel2 := relu(l2, x_node.tensor.l2, 128)       // 256
 	// l3, l3_weight, l3_bias := linear(rel2, 10)    // 128
 	// rel3 := relu(l3, x_node.tensor.l2, 128)
 	// l4, l4_weight, l4_bias := linear(rel3, 10)
-	sm := log_softmax(l2, y_node)
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
+	sm := log_softmax(l1, y_node)
+	params := []*node{l1_weight, l1_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 
@@ -610,11 +642,11 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 
 // simple neural net
 func Simple() {
-	num_batches := 5120 // 51200 // not number of batches, actually just number of samples
+	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
 	batch_size := 64
-	num_epochs := 100
+	num_epochs := 50
 	// Default learning rate is 0.001, but I have found smaller values to work better throughout my testing
-	lr := 0.0001 //0.00001 // 0.000005
+	lr := 0.0001 //0.0005 // 0.0001 //0.00001 // 0.000005
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
 	f, err := os.Open("mnist_train.csv")
@@ -629,13 +661,13 @@ func Simple() {
 	}
 
 	// Create train and test sets
-	train_x := make([]*tensor, num_batches)      // 1000
-	train_y := make([]*tensor, num_batches)      // 1000
-	test_x := make([]*tensor, num_batches/10.+1) // 1000
-	test_y := make([]*tensor, num_batches/10.+1) // 1000
+	train_x := make([]*tensor, num_batches)
+	train_y := make([]*tensor, num_batches)
+	test_x := make([]*tensor, num_batches/10.+1)
+	test_y := make([]*tensor, num_batches/10.+1)
 	data_index := 5
 	for batch := range train_x {
-		x := init_weights(1, 784)
+		x := zeros(1, 784)
 		y := zeros(1, 10)
 		for i := range x.data {
 			x_layer := *x.data[i]
@@ -652,7 +684,7 @@ func Simple() {
 		train_y[batch] = &y
 	}
 	for batch := range test_x {
-		x := init_weights(1, 784)
+		x := zeros(1, 784)
 		y := zeros(1, 10)
 		for i := range x.data {
 			x_layer := *x.data[i]
@@ -675,9 +707,11 @@ func Simple() {
 	prev_m1s := make([]*tensor, len(params))
 	prev_m2s := make([]*tensor, len(params))
 	best_loss := 999999999.
+	// prev_loss := 999999999.
 	best_epoch := -1
 	best_weights := make([]*tensor, len(params))
 	batch_gradients := make([]*tensor, len(params))
+	step := 0
 	for i, x := range params {
 		prev1 := zeros(x.l2, x.l)
 		prev2 := zeros(x.l2, x.l)
@@ -687,16 +721,16 @@ func Simple() {
 		batch_gradients[i] = &bg
 	}
 
-	opt := adam_init{0, 0., prev_m1s, prev_m2s}
+	opt := adam_init{0, lr, prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
 	for epoch := range loss_list {
 		total_loss := 0.
 		// LR SCHEDULER
-		if epoch < num_epochs/10 {
-			opt.alpha = opt.alpha + lr/float64(num_epochs/10)
-		} else {
-			opt.alpha = opt.alpha - lr/float64(9*num_epochs/10)
-		}
+		// if epoch < num_epochs/10 {
+		// 	opt.alpha = opt.alpha + lr/float64(num_epochs/10)
+		// } else {
+		// 	opt.alpha = opt.alpha - lr/float64(9*num_epochs/10)
+		// }
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
@@ -716,6 +750,8 @@ func Simple() {
 					batch_gradients[i] = &bg
 				}
 				adam(params, opt, batch_size)
+				step += 1
+				exp_lr_decay(opt, 0.95, step, 1000)
 			} else {
 				for i, x := range params {
 					batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
@@ -733,9 +769,9 @@ func Simple() {
 		fmt.Println(epoch, " | ", total_loss, " | ", float64(int(1000*math.Exp(-total_loss)))/1000., " | ", time.Now())
 
 		// Adaptive LR to prevent plateaus
-		if total_loss > best_loss {
-			opt.alpha = opt.alpha * 0.3
-		}
+		// if total_loss > prev_loss {
+		// 	opt.alpha = opt.alpha * 0.3
+		// }
 
 		if total_loss < best_loss {
 			best_loss = total_loss
@@ -743,9 +779,12 @@ func Simple() {
 			for i, pnode := range params {
 				best_weights[i] = copy_tens(pnode.tensor)
 			}
-
-			opt.alpha = opt.alpha * 1.1 // not sure this is a good idea, but seems like a decent way to speed up training
 		}
+		// counterbalance to adaptive LR
+		// if total_loss < prev_loss {
+		// 	opt.alpha = opt.alpha * 1.3 // not sure this is a good idea, but seems like a decent way to speed up training
+		// }
+		// prev_loss = total_loss
 	}
 	fmt.Println("BEST LOSS: ", best_epoch, " | ", best_loss)
 	for i, pnode := range params {
@@ -791,4 +830,5 @@ func Simple() {
 	fmt.Println("Validation Data", " | ", total_loss/(float64(len(test_x))))
 	fmt.Println("Total correct:   ", correct)
 	fmt.Println("Total incorrect: ", incorrect)
+	fmt.Println(100.*correct/(correct+incorrect), "%")
 }
