@@ -318,9 +318,9 @@ func nll_loss(pred *tensor, target *tensor, gradients *tensor) float64 {
 }
 
 // Least Squares loss
-func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
+func least_squares_loss(pred *tensor, target *tensor, gradients *tensor) float64 {
 	loss := 0.
-	grad := ones(pred.l2, pred.l)
+	grad := gradients
 	for j := range target.data {
 		grad_layer := *grad.data[j]
 		target_layer := *target.data[j]
@@ -330,7 +330,7 @@ func least_squares_loss(pred *tensor, target *tensor) (float64, tensor) {
 			grad_layer[i] = 2 * (pred_layer[i] - t)
 		}
 	}
-	return loss, grad
+	return loss
 }
 
 // initialize adam optimizer
@@ -596,10 +596,16 @@ func backward(root *node) {
 	} else if root.op == "sm" {
 		for i := 0; i < root.tensor.l2; i++ {
 			grad_layer := *root.grad.data[i]
-			data_layer := *root.tensor.data[i]
+			// data_layer := *root.tensor.data[i]
 			ret_layer := *root.left.grad.data[i]
+			left_data_layer := *root.left.tensor.data[i]
+			grad_sum := 0.
 			for j := 0; j < root.tensor.l; j++ {
-				ret_layer[j] = (1. - data_layer[j]) * grad_layer[j]
+				grad_sum += left_data_layer[j] * grad_layer[j]
+			}
+			for j := 0; j < root.tensor.l; j++ {
+				// ret_layer[j] = (1. - data_layer[j]) * grad_layer[j]
+				ret_layer[j] = -1. * (left_data_layer[j] - grad_sum) * grad_layer[j]
 			}
 		}
 		backward(root.left)
@@ -632,6 +638,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	// rel3 := relu(l3, x_node.tensor.l2, 128)
 	// l4, l4_weight, l4_bias := linear(rel3, 10)
 	sm := log_softmax(l1, y_node)
+	// sm := sigmoid(l1, l1.l2, l1.l)
 	params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
@@ -644,9 +651,9 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 func Simple() {
 	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
 	batch_size := 64
-	num_epochs := 50
+	num_epochs := 100
 	// Default learning rate is 0.001, but I have found smaller values to work better throughout my testing
-	lr := 0.0001 //0.0005 // 0.0001 //0.00001 // 0.000005
+	lr := 0.001 //0.0005 // 0.0001 //0.00001 // 0.000005
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
 	f, err := os.Open("mnist_train.csv")
@@ -671,7 +678,7 @@ func Simple() {
 		y := zeros(1, 10)
 		for i := range x.data {
 			x_layer := *x.data[i]
-			y_layer := *y.data[i]
+			y_layer := *y.data[0]
 			y_val, _ := strconv.Atoi(data[data_index][0])
 			y_layer[y_val] = 1.
 			for j := range x_layer {
@@ -740,6 +747,7 @@ func Simple() {
 			zero_grad := zeros(sm.grad.l2, sm.grad.l)
 			sm.grad = &zero_grad
 			loss = nll_loss(pred, y_node.tensor, sm.grad)
+			// loss = least_squares_loss(pred, y_node.tensor, sm.grad)
 			backward(sm)
 
 			// minibatching
