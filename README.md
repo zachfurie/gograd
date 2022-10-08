@@ -64,7 +64,7 @@ for epoch := range loss_list {
 			}
 			adam(params, opt, batch_size)
 			step += 1
-			exp_lr_decay(opt, 0.95, step, 1000)
+			exp_lr_decay(opt, 0.95, step, num_epochs)
 		} else {
 			for i, x := range params {
 				batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)

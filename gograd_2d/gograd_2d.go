@@ -761,9 +761,6 @@ func Simple() {
 		val_y[batch] = &y
 	}
 
-	// Validation set - 10,000 total
-	// [need to calculate loss on validation set at end of each epoch before deciding if it is best model or not]
-
 	x := train_x[0] //these are arbitrary, just needed to give the dimensions to _simple() to initialize x_node and y_node
 	y := train_y[0]
 	loss_list := make([]float64, num_epochs)
@@ -808,7 +805,7 @@ func Simple() {
 				}
 				adam(params, opt, batch_size)
 				step += 1
-				exp_lr_decay(opt, 0.95, step, 1000)
+				exp_lr_decay(opt, 0.95, step, num_epochs)
 			} else {
 				for i, x := range params {
 					batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
