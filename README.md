@@ -52,8 +52,6 @@ for epoch := range loss_list {
 		x_node.tensor = train_x[batch]
 		y_node.tensor = train_y[batch]
 		pred := forward(sm)
-		zero_grad := zeros(sm.grad.l2, sm.grad.l)
-		sm.grad = &zero_grad
 		nll_loss(pred, y_node.tensor, sm.grad)
 		backward(sm)
 
