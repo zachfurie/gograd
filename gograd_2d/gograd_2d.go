@@ -652,18 +652,20 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 10) // 784
+	l1, l1_weight, l1_bias := linear(x_node, 128) // 784
 	// rel1 := relu(l1, x_node.tensor.l2, 5)       // 784
-	// l2, l2_weight, l2_bias := linear(l1, 10) // 256
+	s1 := sigmoid(l1)
+	l2, l2_weight, l2_bias := linear(s1, 64) // 256
+	s2 := sigmoid(l2)
 	// rel2 := relu(l2, x_node.tensor.l2, 128)       // 256
-	// l3, l3_weight, l3_bias := linear(rel2, 10)    // 128
+	l3, l3_weight, l3_bias := linear(s2, 10) // 128
 	// rel3 := relu(l3, x_node.tensor.l2, 128)
 	// l4, l4_weight, l4_bias := linear(rel3, 10)
-	sm := log_softmax(l1, y_node)
+	sm := log_softmax(l3, y_node)
 	// sm := sigmoid(l1)
-	params := []*node{l1_weight, l1_bias}
+	// params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
-	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 
 	return sm, params, x_node, y_node
@@ -673,7 +675,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 func Simple() {
 	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
 	batch_size := 64
-	num_epochs := 1000
+	num_epochs := 30
 	lr := 0.001
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
@@ -687,13 +689,25 @@ func Simple() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	fv, err := os.Open("mnist_test.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer fv.Close()
+	csvReaderv := csv.NewReader(fv)
+	datav, err := csvReaderv.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// Create train and test sets
+	// Create train,test sets and val set
 	train_x := make([]*tensor, num_batches)
 	train_y := make([]*tensor, num_batches)
 	test_x := make([]*tensor, num_batches/10.+1) // +1 ensures test set is not empty for train sets w/ len<10
 	test_y := make([]*tensor, num_batches/10.+1)
-	data_index := 5
+	val_x := make([]*tensor, 10000)
+	val_y := make([]*tensor, 10000)
+	data_index := 1 // skip first line with column labels
 	for batch := range train_x {
 		x := zeros(1, 784)
 		y := zeros(1, 10)
@@ -717,19 +731,41 @@ func Simple() {
 		for i := range x.data {
 			x_layer := *x.data[i]
 			y_layer := *y.data[i]
-			y_val, _ := strconv.Atoi(data[data_index][0])
-			y_layer[y_val] = 1.
+			y_value, _ := strconv.Atoi(data[data_index][0])
+			y_layer[y_value] = 1.
 			for j := range x_layer {
-				x_val, _ := strconv.Atoi(data[data_index][j])
-				x_layer[j] = float64(x_val) / 255.
+				x_value, _ := strconv.Atoi(data[data_index][j])
+				x_layer[j] = float64(x_value) / 255.
 			}
 			data_index += 1
 		}
 		test_x[batch] = &x
 		test_y[batch] = &y
 	}
-	x := train_x[0]
-	y := train_x[0]
+	data_index_v := 1 // skip first line with column labels
+	for batch := range val_x {
+		x := zeros(1, 784)
+		y := zeros(1, 10)
+		for i := range x.data {
+			x_layer := *x.data[i]
+			y_layer := *y.data[i]
+			y_value, _ := strconv.Atoi(datav[data_index_v][0])
+			y_layer[y_value] = 1.
+			for j := range x_layer {
+				x_value, _ := strconv.Atoi(datav[data_index_v][j])
+				x_layer[j] = float64(x_value) / 255.
+			}
+			data_index_v += 1
+		}
+		val_x[batch] = &x
+		val_y[batch] = &y
+	}
+
+	// Validation set - 10,000 total
+	// [need to calculate loss on validation set at end of each epoch before deciding if it is best model or not]
+
+	x := train_x[0] //these are arbitrary, just needed to give the dimensions to _simple() to initialize x_node and y_node
+	y := train_y[0]
 	loss_list := make([]float64, num_epochs)
 	sm, params, x_node, y_node := _simple(x, y)
 	prev_m1s := make([]*tensor, len(params))
@@ -759,7 +795,7 @@ func Simple() {
 			pred := forward(sm)
 			zero_grad := zeros(sm.grad.l2, sm.grad.l)
 			sm.grad = &zero_grad
-			loss := nll_loss(pred, y_node.tensor, sm.grad)
+			nll_loss(pred, y_node.tensor, sm.grad)
 			// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
 			backward(sm)
 
@@ -778,15 +814,21 @@ func Simple() {
 					batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
 				}
 			}
-			total_loss += loss
 
 			if batch == num_batches-1 {
 				pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
 				pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
 			}
 		}
-
-		total_loss = total_loss / (float64(num_batches))
+		test_loss := 0.
+		for batch := range test_x {
+			x_node.tensor = test_x[batch]
+			y_node.tensor = test_y[batch]
+			pred := forward(sm)
+			loss := nll_loss(pred, y_node.tensor, sm.grad)
+			test_loss += loss
+		}
+		total_loss = test_loss / (float64(num_batches))
 		fmt.Println(epoch, " | ", total_loss, " | ", float64(int(1000*math.Exp(-total_loss)))/1000., " | ", time.Now())
 
 		if total_loss < best_loss {
@@ -805,9 +847,9 @@ func Simple() {
 	correct := 0
 	incorrect := 0
 	fmt.Println("====== VALIDATING ======")
-	for batch := range test_x {
-		x_node.tensor = test_x[batch]
-		y_node.tensor = test_y[batch]
+	for batch := range val_x {
+		x_node.tensor = val_x[batch]
+		y_node.tensor = val_y[batch]
 		pred := forward(sm)
 
 		// get max of pred
@@ -839,8 +881,8 @@ func Simple() {
 		// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
 		total_loss += loss
 	}
-	fmt.Println("Validation Data", " | ", total_loss/(float64(len(test_x))))
+	fmt.Println("Validation Data", " | ", total_loss/10000.)
 	fmt.Println("Total correct:   ", correct)
 	fmt.Println("Total incorrect: ", incorrect)
-	fmt.Println(100.*correct/(correct+incorrect), "%")
+	fmt.Println(100.*float64(correct)/float64(correct+incorrect), "%")
 }
