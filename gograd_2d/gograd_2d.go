@@ -652,21 +652,22 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 128) // 784
-	// rel1 := relu(l1, x_node.tensor.l2, 5)       // 784
+	l1, l1_weight, l1_bias := linear(x_node, 1000)
+	// rel1 := relu(l1, x_node.tensor.l2, 5)
 	s1 := sigmoid(l1)
-	l2, l2_weight, l2_bias := linear(s1, 64) // 256
+	l2, l2_weight, l2_bias := linear(s1, 256)
 	s2 := sigmoid(l2)
-	// rel2 := relu(l2, x_node.tensor.l2, 128)       // 256
-	l3, l3_weight, l3_bias := linear(s2, 10) // 128
-	// rel3 := relu(l3, x_node.tensor.l2, 128)
-	// l4, l4_weight, l4_bias := linear(rel3, 10)
-	sm := log_softmax(l3, y_node)
-	// sm := sigmoid(l1)
+	l25, l25_weight, l25_bias := linear(s2, 128)
+	s25 := sigmoid(l25)
+	l3, l3_weight, l3_bias := linear(s25, 64)
+	s3 := sigmoid(l3)
+	l4, l4_weight, l4_bias := linear(s3, 10)
+	sm := log_softmax(l4, y_node)
 	// params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
 
 	return sm, params, x_node, y_node
 }
@@ -784,8 +785,14 @@ func Simple() {
 
 	opt := adam_init{0, lr, prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
+	fmt.Println("	", time.Now())
 	for epoch := range loss_list {
 		total_loss := 0.
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(train_x), func(i, j int) {
+			train_x[i], train_x[j] = train_x[j], train_x[i]
+			train_y[i], train_y[j] = train_y[j], train_y[i]
+		})
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
@@ -868,7 +875,6 @@ func Simple() {
 				break
 			}
 		}
-		// fmt.Println("y value: ", y_num, " | prediction: ", pred_num)
 		if y_num == pred_num {
 			correct += 1
 		} else {

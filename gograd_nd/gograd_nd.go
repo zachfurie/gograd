@@ -28,3 +28,13 @@ type tensor struct {
 }
 
 //  ----------------------------------- Auxiliary Functions:  -----------------------------------
+
+func (t *tensor) get(ind []int) float64 {
+	// assert len(ind) = t.dims
+	ret := 0.
+	return ret
+}
+
+func (t *tensor) shape() []int {
+	return t.dimlen
+}

@@ -1,7 +1,7 @@
 
-## Autograd in Golang
+# Autograd in Golang
 
-Achieved 97.7% correct predictions on MNIST with less than 30 mins of training. 
+Achieved 98.2% correct predictions on MNIST with an hour of training. 
 Not amazing, but shows that the library works. 
 
 To Do:
@@ -20,6 +20,8 @@ Long Term:
 
 
 
+
+## Gograd_2d Example Usage:
 ```go
 // Define Model
 func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
