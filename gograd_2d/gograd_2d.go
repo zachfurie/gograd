@@ -718,7 +718,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 1000)
+	l1, l1_weight, l1_bias := linear(x_node, 256)
 	// rel1 := relu(l1, x_node.tensor.l2, 5)
 	s1 := sigmoid(l1)
 	l2, l2_weight, l2_bias := linear(s1, 256)
@@ -851,7 +851,7 @@ func Simple() {
 
 	opt := adam_init{0, lr, prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
-	fmt.Println("	", time.Now())
+	// fmt.Println("	", time.Now())
 	for epoch := range loss_list {
 		total_loss := 0.
 		rand.Seed(time.Now().UnixNano())
@@ -859,6 +859,7 @@ func Simple() {
 			train_x[i], train_x[j] = train_x[j], train_x[i]
 			train_y[i], train_y[j] = train_y[j], train_y[i]
 		})
+		start_time := time.Now()
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y_node.tensor = train_y[batch]
@@ -899,7 +900,8 @@ func Simple() {
 			test_loss += loss
 		}
 		total_loss = test_loss / (float64(num_batches))
-		fmt.Println(epoch, " | ", total_loss, " | ", float64(int(1000*math.Exp(-total_loss)))/1000., " | ", time.Now())
+		end_time := time.Now()
+		fmt.Println(epoch, " | ", total_loss, " | ", float64(int(1000*math.Exp(-total_loss)))/1000., " | ", end_time.Sub(start_time))
 
 		if total_loss < best_loss {
 			best_loss = total_loss

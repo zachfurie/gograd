@@ -13,7 +13,7 @@ import (
 func main() {
 	numCPUs := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPUs)
-	fmt.Println(runtime.GOMAXPROCS(numCPUs))
+	fmt.Println("using ", runtime.GOMAXPROCS(numCPUs), " cores")
 	rand.Seed(time.Now().UnixNano())
 	fmt.Println("------------------------------------------------------------------------")
 	gograd_2d.Simple()
