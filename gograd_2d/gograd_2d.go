@@ -509,17 +509,17 @@ func forward(root *node) *tensor {
 		var mm_wg sync.WaitGroup
 		for k := 0; k < x.l2; k++ {
 			x_layer := *x.data[k]
-			for i := 0; i < a.l2; i++ {
-				a_layer := *a.data[i]
-				data_layer := *root.tensor.data[k]
-				mm_wg.Add(1)
-				go func(i int) {
-					defer mm_wg.Done()
+			data_layer := *root.tensor.data[k]
+			mm_wg.Add(1)
+			go func(k int) {
+				defer mm_wg.Done()
+				for i := 0; i < a.l2; i++ {
+					a_layer := *a.data[i]
 					for j := 0; j < root.l; j++ {
 						data_layer[i] += a_layer[j] * x_layer[j]
 					}
-				}(i)
-			}
+				}
+			}(k)
 		}
 		mm_wg.Wait()
 	} else if root.op == "relu" { // relu
@@ -597,11 +597,8 @@ func backward(root *node) {
 	if !root.require_grad {
 		return
 	} else if root.op == "+" { // add()
-		// Chain rule for a + b
 		root.left.grad = copy_tens(root.grad) // I dont think I should have to copy (instead could just assign the pointer), but trying this to be safe.
 		root.right.grad = copy_tens(root.grad)
-		// go backward(root.left)
-		// go backward(root.right)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -634,30 +631,27 @@ func backward(root *node) {
 		backward(root.left)
 		backward(root.right)
 	} else if root.op == "mm" { // matmul()
-		// gradient should be m x n * n x p -> m x p
-		// a = root.left
-		// x = root.right
 		zero_grad_left := zeros(root.left.tensor.l2, root.left.tensor.l)
 		zero_grad_right := zeros(root.right.tensor.l2, root.right.tensor.l)
 		root.left.grad = &zero_grad_left
 		root.right.grad = &zero_grad_right
 		var mm_wg sync.WaitGroup
 		for i := 0; i < root.left.tensor.l2; i++ {
-			for i2 := 0; i2 < root.right.tensor.l2; i2++ {
-				root_grad := *root.grad.data[i2]
-				left_layer := *root.left.grad.data[i]
-				right_layer := *root.right.grad.data[i2]
-				left_data := *root.left.tensor.data[i]
-				right_data := *root.right.tensor.data[i2]
-				mm_wg.Add(1)
-				go func(i int) {
-					defer mm_wg.Done()
+			mm_wg.Add(1)
+			go func(i int) {
+				defer mm_wg.Done()
+				for i2 := 0; i2 < root.right.tensor.l2; i2++ {
+					root_grad := *root.grad.data[i2]
+					left_layer := *root.left.grad.data[i]
+					right_layer := *root.right.grad.data[i2]
+					left_data := *root.left.tensor.data[i]
+					right_data := *root.right.tensor.data[i2]
 					for j := 0; j < root.left.tensor.l; j++ {
 						left_layer[j] += right_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
 						right_layer[j] += left_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
 					}
-				}(i)
-			}
+				}
+			}(i)
 		}
 		mm_wg.Wait()
 		wg.Add(1)
@@ -671,8 +665,6 @@ func backward(root *node) {
 			backward(root.right)
 		}()
 		wg.Wait()
-		// go backward(root.left)
-		// go backward(root.right)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
@@ -721,19 +713,19 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	l1, l1_weight, l1_bias := linear(x_node, 256)
 	// rel1 := relu(l1, x_node.tensor.l2, 5)
 	s1 := sigmoid(l1)
-	l2, l2_weight, l2_bias := linear(s1, 256)
+	l2, l2_weight, l2_bias := linear(s1, 128)
 	s2 := sigmoid(l2)
-	l25, l25_weight, l25_bias := linear(s2, 128)
-	s25 := sigmoid(l25)
-	l3, l3_weight, l3_bias := linear(s25, 64)
+	// l25, l25_weight, l25_bias := linear(s2, 64)
+	// s25 := sigmoid(l25)
+	l3, l3_weight, l3_bias := linear(s2, 64)
 	s3 := sigmoid(l3)
 	l4, l4_weight, l4_bias := linear(s3, 10)
 	sm := log_softmax(l4, y_node)
 	// params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
-	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
 
 	return sm, params, x_node, y_node
 }
@@ -742,7 +734,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 func Simple() {
 	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
 	batch_size := 64
-	num_epochs := 30
+	num_epochs := 10
 	lr := 0.001
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
@@ -851,7 +843,7 @@ func Simple() {
 
 	opt := adam_init{0, lr, prev_m1s, prev_m2s}
 	fmt.Println("======= START TRAINING ======")
-	// fmt.Println("	", time.Now())
+	total_start_time := time.Now()
 	for epoch := range loss_list {
 		total_loss := 0.
 		rand.Seed(time.Now().UnixNano())
@@ -912,6 +904,7 @@ func Simple() {
 		}
 	}
 	fmt.Println("BEST LOSS: ", best_epoch, " | ", best_loss)
+	fmt.Println("Total training time: ", time.Now().Sub(total_start_time))
 	for i, pnode := range params {
 		pnode.tensor = best_weights[i]
 	}
