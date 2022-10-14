@@ -499,16 +499,22 @@ func forward(root *node) *tensor {
 		wg.Wait()
 		a := root.left.tensor
 		x := root.right.tensor
+		var mm_wg sync.WaitGroup
 		for k := 0; k < x.l2; k++ {
 			x_layer := *x.data[k]
 			for i := 0; i < a.l2; i++ {
 				a_layer := *a.data[i]
 				data_layer := *root.tensor.data[k]
-				for j := 0; j < root.l; j++ {
-					data_layer[i] += a_layer[j] * x_layer[j]
-				}
+				mm_wg.Add(1)
+				go func(i int) {
+					defer mm_wg.Done()
+					for j := 0; j < root.l; j++ {
+						data_layer[i] += a_layer[j] * x_layer[j]
+					}
+				}(i)
 			}
 		}
+		mm_wg.Wait()
 	} else if root.op == "relu" { // relu
 		a := forward(root.left)
 		for i := 0; i < a.l2; i++ {
@@ -616,6 +622,7 @@ func backward(root *node) {
 		zero_grad_right := zeros(root.right.tensor.l2, root.right.tensor.l)
 		root.left.grad = &zero_grad_left
 		root.right.grad = &zero_grad_right
+		var mm_wg sync.WaitGroup
 		for i := 0; i < root.left.tensor.l2; i++ {
 			for i2 := 0; i2 < root.right.tensor.l2; i2++ {
 				root_grad := *root.grad.data[i2]
@@ -623,12 +630,17 @@ func backward(root *node) {
 				right_layer := *root.right.grad.data[i2]
 				left_data := *root.left.tensor.data[i]
 				right_data := *root.right.tensor.data[i2]
-				for j := 0; j < root.left.tensor.l; j++ {
-					left_layer[j] += right_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
-					right_layer[j] += left_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
-				}
+				mm_wg.Add(1)
+				go func(i int) {
+					defer mm_wg.Done()
+					for j := 0; j < root.left.tensor.l; j++ {
+						left_layer[j] += right_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
+						right_layer[j] += left_data[j] * root_grad[i] // += because element is multiplied by multiple elements in other matrix
+					}
+				}(i)
 			}
 		}
+		mm_wg.Wait()
 		go backward(root.left)
 		go backward(root.right)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()

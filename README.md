@@ -12,7 +12,7 @@ To Do:
 * Conv2d
 
 Long Term:
-* goroutines?
+* goroutines and BLAS
 * print comp graph
 * transformer (read Attention Is All You Need)
 * rewrite in Rust
