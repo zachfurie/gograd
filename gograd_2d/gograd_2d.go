@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -448,10 +449,24 @@ func forward(root *node) *tensor {
 		zeroed_data := zeros(root.tensor.l2, root.tensor.l)
 		root.tensor = &zeroed_data
 	}
+	var wg sync.WaitGroup
 	if root.op == "+" { // add
 		// Return tensor a + b
-		t1 := forward(root.left)
-		t2 := forward(root.right)
+		// t1 := forward(root.left)
+		// t2 := forward(root.right)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			forward(root.left)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			forward(root.right)
+		}()
+		wg.Wait()
+		t1 := root.left.tensor
+		t2 := root.right.tensor
 		for i := range root.tensor.data {
 			t0d := *root.tensor.data[i]
 			t1d := *t1.data[i]
