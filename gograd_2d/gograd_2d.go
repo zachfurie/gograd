@@ -360,37 +360,44 @@ func adam(weights []*node, init adam_init, bsz int) {
 	init.t += 1
 	t := init.t
 	alpha := init.alpha * math.Sqrt((1. - math.Pow(b2, t))) / (1. - math.Pow(b1, t))
+	var w_wg sync.WaitGroup
 	for k, w := range weights {
 		if !w.require_grad {
 			continue
 		}
-		prev_m1 := *init.prev_m1s[k]
-		prev_m2 := *init.prev_m2s[k]
-		for i := 0; i < w.l2; i++ {
-			grad_layer := *w.grad.data[i]
-			data_layer := *w.tensor.data[i]
-			prev_m1_layer := *prev_m1.data[i]
-			prev_m2_layer := *prev_m2.data[i]
-			for j := 0; j < w.l; j++ {
-				grad_layer[j] = grad_layer[j] / float64(bsz) // get mean gradient of batch
-				//-gradient--clipping-
-				if grad_layer[j] > 1.0 {
-					grad_layer[j] = 1.0
+
+		w_wg.Add(1)
+		go func(k int, w *node) {
+			defer w_wg.Done()
+			prev_m1 := *init.prev_m1s[k]
+			prev_m2 := *init.prev_m2s[k]
+			for i := 0; i < w.l2; i++ {
+				grad_layer := *w.grad.data[i]
+				data_layer := *w.tensor.data[i]
+				prev_m1_layer := *prev_m1.data[i]
+				prev_m2_layer := *prev_m2.data[i]
+				for j := 0; j < w.l; j++ {
+					grad_layer[j] = grad_layer[j] / float64(bsz) // get mean gradient of batch
+					//-gradient--clipping-
+					if grad_layer[j] > 1.0 {
+						grad_layer[j] = 1.0
+					}
+					if grad_layer[j] < -1.0 {
+						grad_layer[j] = -1.0
+					}
+					//-------------------
+					m1 := prev_m1_layer[j]
+					m2 := prev_m2_layer[j]
+					biased_m1 := (m1 * b1) + ((1. - b1) * grad_layer[j])
+					biased_m2 := (m2 * b2) + ((1. - b2) * math.Pow(grad_layer[j], 2.))
+					data_layer[j] = data_layer[j] - (alpha * biased_m1 / (math.Sqrt(biased_m2) + epsilon))
+					prev_m1_layer[j] = biased_m1
+					prev_m2_layer[j] = biased_m2
 				}
-				if grad_layer[j] < -1.0 {
-					grad_layer[j] = -1.0
-				}
-				//-------------------
-				m1 := prev_m1_layer[j]
-				m2 := prev_m2_layer[j]
-				biased_m1 := (m1 * b1) + ((1. - b1) * grad_layer[j])
-				biased_m2 := (m2 * b2) + ((1. - b2) * math.Pow(grad_layer[j], 2.))
-				data_layer[j] = data_layer[j] - (alpha * biased_m1 / (math.Sqrt(biased_m2) + epsilon))
-				prev_m1_layer[j] = biased_m1
-				prev_m2_layer[j] = biased_m2
 			}
-		}
+		}(k, w)
 	}
+	w_wg.Wait()
 }
 
 // Basic grad descent step
@@ -578,6 +585,7 @@ func forward(root *node) *tensor {
 
 // Back Propagation function. Recursively calculates gradients of loss function using chain rule. If zero_grad is true, will set all gradients to zero.
 func backward(root *node) {
+	var wg sync.WaitGroup
 	if root.left != nil {
 		zeroed_data := zeros(root.left.grad.l2, root.left.grad.l)
 		root.left.grad = &zeroed_data
@@ -592,8 +600,19 @@ func backward(root *node) {
 		// Chain rule for a + b
 		root.left.grad = copy_tens(root.grad) // I dont think I should have to copy (instead could just assign the pointer), but trying this to be safe.
 		root.right.grad = copy_tens(root.grad)
-		go backward(root.left)
-		go backward(root.right)
+		// go backward(root.left)
+		// go backward(root.right)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backward(root.left)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backward(root.right)
+		}()
+		wg.Wait()
 	} else if root.op == "*" { // mul()
 		// Chain rule for a * b
 		for i := 0; i < root.l2; i++ {
@@ -641,8 +660,19 @@ func backward(root *node) {
 			}
 		}
 		mm_wg.Wait()
-		go backward(root.left)
-		go backward(root.right)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backward(root.left)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backward(root.right)
+		}()
+		wg.Wait()
+		// go backward(root.left)
+		// go backward(root.right)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
