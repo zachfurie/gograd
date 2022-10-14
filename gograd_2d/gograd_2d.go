@@ -452,8 +452,6 @@ func forward(root *node) *tensor {
 	var wg sync.WaitGroup
 	if root.op == "+" { // add
 		// Return tensor a + b
-		// t1 := forward(root.left)
-		// t2 := forward(root.right)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -501,8 +499,6 @@ func forward(root *node) *tensor {
 		wg.Wait()
 		a := root.left.tensor
 		x := root.right.tensor
-		// a := forward(root.left)
-		// x := forward(root.right)
 		for k := 0; k < x.l2; k++ {
 			x_layer := *x.data[k]
 			for i := 0; i < a.l2; i++ {
