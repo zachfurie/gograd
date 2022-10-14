@@ -488,8 +488,21 @@ func forward(root *node) *tensor {
 			}
 		}
 	} else if root.op == "mm" { // matmul
-		a := forward(root.left)
-		x := forward(root.right)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			forward(root.left)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			forward(root.right)
+		}()
+		wg.Wait()
+		a := root.left.tensor
+		x := root.right.tensor
+		// a := forward(root.left)
+		// x := forward(root.right)
 		for k := 0; k < x.l2; k++ {
 			x_layer := *x.data[k]
 			for i := 0; i < a.l2; i++ {
@@ -577,8 +590,8 @@ func backward(root *node) {
 		// Chain rule for a + b
 		root.left.grad = copy_tens(root.grad) // I dont think I should have to copy (instead could just assign the pointer), but trying this to be safe.
 		root.right.grad = copy_tens(root.grad)
-		backward(root.left)
-		backward(root.right)
+		go backward(root.left)
+		go backward(root.right)
 	} else if root.op == "*" { // mul()
 		// Chain rule for a * b
 		for i := 0; i < root.l2; i++ {
@@ -620,8 +633,8 @@ func backward(root *node) {
 				}
 			}
 		}
-		backward(root.left)
-		backward(root.right)
+		go backward(root.left)
+		go backward(root.right)
 	} else if root.op == "relu" || root.op == "do" { // relu() or dropout()
 		data1 := zeros(root.l2, root.l)
 		for i := 0; i < root.l2; i++ {
