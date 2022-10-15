@@ -87,8 +87,9 @@ func ones(l2 int, l int) tensor {
 
 // Returns a tensor with weights initialized from normal distribution * sqrt(2/n), where n is number of elements being initialized
 func init_weights(l2 int, l int) tensor {
-	// Initializing for ReLU: https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
-	std := math.Sqrt(2. / float64(l))
+	// Initializing for ReLU, sigmoid/tanh: https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
+	// std := math.Sqrt(2. / float64(l)) // relu
+	std := 1. / math.Sqrt(float64(l)) // sigmoid
 	zero_grad_pts := make([]*[]float64, l2)
 	for i := range zero_grad_pts {
 		zero_grad_data := make([]float64, l)
@@ -295,10 +296,10 @@ func linear(in *node, out_dim int) (*node, *node, *node) {
 }
 
 // Log Softmax layer
-func log_softmax(in *node, target *node) *node {
+func log_softmax(in *node) *node {
 	zero_grad := ones(in.tensor.l2, in.tensor.l)
 	data := zeros(in.tensor.l2, in.tensor.l)
-	new_node := node{in, target, "sm", &data, &zero_grad, in.tensor.l2, in.tensor.l, true}
+	new_node := node{in, nil, "sm", &data, &zero_grad, in.tensor.l2, in.tensor.l, true}
 	return &new_node
 }
 
@@ -698,11 +699,9 @@ func backward(root *node) {
 // ----------------------------------- TESTING (will be removed when done) -----------------------------------
 
 // Example of a Neural Network constructor. Returns output layer node, slice of all parameter leaf nodes, input node, and target node.
-func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
-	x_node := leaf(x, false)
-	y_node := leaf(y, false)
-
-	// NN:
+func _simple(l2 int, l int) (*node, []*node, *node) {
+	x_placeholder := zeros(l2, l)
+	x_node := leaf(&x_placeholder, false)
 	l1, l1_weight, l1_bias := linear(x_node, 10)
 	// rel1 := relu(l1, x_node.tensor.l2, 5)
 	// s1 := sigmoid(l1)
@@ -713,14 +712,14 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	// l3, l3_weight, l3_bias := linear(s2, 64)
 	// s3 := sigmoid(l3)
 	// l4, l4_weight, l4_bias := linear(s3, 10)
-	sm := log_softmax(l1, y_node)
+	sm := log_softmax(l1)
 	params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
 
-	return sm, params, x_node, y_node
+	return sm, params, x_node
 }
 
 // simple neural net
@@ -731,7 +730,7 @@ func Simple() {
 	lr := 0.001
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
-	f, err := os.Open("mnist_train.csv")
+	f, err := os.Open("fashion-mnist_train.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -741,7 +740,7 @@ func Simple() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fv, err := os.Open("mnist_test.csv")
+	fv, err := os.Open("fashion-mnist_test.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -813,10 +812,8 @@ func Simple() {
 		val_y[batch] = &y
 	}
 
-	x := train_x[0] //these are arbitrary, just needed to give the dimensions to _simple() to initialize x_node and y_node
-	y := train_y[0]
 	loss_list := make([]float64, num_epochs)
-	sm, params, x_node, y_node := _simple(x, y)
+	out, params, x_node := _simple(1, 784)
 	prev_m1s := make([]*tensor, len(params))
 	prev_m2s := make([]*tensor, len(params))
 	best_loss := 999999999.
@@ -847,13 +844,13 @@ func Simple() {
 		start_time := time.Now()
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
-			y_node.tensor = train_y[batch]
-			pred := forward(sm)
-			zero_grad := zeros(sm.grad.l2, sm.grad.l)
-			sm.grad = &zero_grad
-			nll_loss(pred, y_node.tensor, sm.grad)
+			y := train_y[batch]
+			pred := forward(out)
+			zero_grad := zeros(out.grad.l2, out.grad.l)
+			out.grad = &zero_grad
+			nll_loss(pred, y, out.grad)
 			// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
-			backward(sm)
+			backward(out)
 			for i, x := range params {
 				batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
 			}
@@ -877,9 +874,9 @@ func Simple() {
 		test_loss := 0.
 		for batch := range test_x {
 			x_node.tensor = test_x[batch]
-			y_node.tensor = test_y[batch]
-			pred := forward(sm)
-			loss := nll_loss(pred, y_node.tensor, sm.grad)
+			y := test_y[batch]
+			pred := forward(out)
+			loss := nll_loss(pred, y, out.grad)
 			test_loss += loss
 		}
 		total_loss = test_loss / (float64(num_batches))
@@ -905,8 +902,8 @@ func Simple() {
 	fmt.Println("====== VALIDATING ======")
 	for batch := range val_x {
 		x_node.tensor = val_x[batch]
-		y_node.tensor = val_y[batch]
-		pred := forward(sm)
+		y := val_y[batch]
+		pred := forward(out)
 
 		// get max of pred
 		pred_layer := *pred.data[0]
@@ -919,7 +916,7 @@ func Simple() {
 				pred_num = i
 			}
 		}
-		y_layer := *y_node.tensor.data[0]
+		y_layer := *y.data[0]
 		y_num := -1
 		for i, p := range y_layer {
 			if p > 0 {
@@ -932,7 +929,7 @@ func Simple() {
 		} else {
 			incorrect += 1
 		}
-		loss := nll_loss(pred, y_node.tensor, sm.grad)
+		loss := nll_loss(pred, y, out.grad)
 		// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
 		total_loss += loss
 	}
