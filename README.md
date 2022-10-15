@@ -1,18 +1,17 @@
 
 # Autograd in Golang
 
-Achieved 98.2% correct predictions on MNIST with an hour of training. 
-Not amazing, but shows that the library works. 
+Gograd_2d: Achieved 98.2% correct predictions on MNIST with an hour of training. Not amazing, but shows that the library works. 
+
+Gograd_nd: Achieved 100% correct predictions on MNIST with 00:01:30 of training. Further exploration required.
 
 To Do:
-* New tensor implementation that only uses one slice.
 * log() and exp() for tensors
 * max() and mean() for tensors
 * reshaping, slicing, etc for tensors
 * Conv2d
 
 Long Term:
-* goroutines and BLAS
 * print comp graph
 * transformer (read Attention Is All You Need)
 * rewrite in Rust
