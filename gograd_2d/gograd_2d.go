@@ -190,9 +190,6 @@ func copy_tens(t *tensor) *tensor {
 		layer := *t.data[x]
 		copy_layer := *copy_t.data[x]
 		copy(copy_layer, layer)
-		// for y := range layer {
-		// 	copy_layer[y] = layer[y]
-		// }
 	}
 	return &copy_t
 }
@@ -631,10 +628,6 @@ func backward(root *node) {
 		backward(root.left)
 		backward(root.right)
 	} else if root.op == "mm" { // matmul()
-		zero_grad_left := zeros(root.left.tensor.l2, root.left.tensor.l)
-		zero_grad_right := zeros(root.right.tensor.l2, root.right.tensor.l)
-		root.left.grad = &zero_grad_left
-		root.right.grad = &zero_grad_right
 		var mm_wg sync.WaitGroup
 		for i := 0; i < root.left.tensor.l2; i++ {
 			mm_wg.Add(1)
@@ -710,21 +703,21 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 256)
+	l1, l1_weight, l1_bias := linear(x_node, 10)
 	// rel1 := relu(l1, x_node.tensor.l2, 5)
-	s1 := sigmoid(l1)
-	l2, l2_weight, l2_bias := linear(s1, 128)
-	s2 := sigmoid(l2)
+	// s1 := sigmoid(l1)
+	// l2, l2_weight, l2_bias := linear(s1, 10)
+	// s2 := sigmoid(l2)
 	// l25, l25_weight, l25_bias := linear(s2, 64)
 	// s25 := sigmoid(l25)
-	l3, l3_weight, l3_bias := linear(s2, 64)
-	s3 := sigmoid(l3)
-	l4, l4_weight, l4_bias := linear(s3, 10)
-	sm := log_softmax(l4, y_node)
-	// params := []*node{l1_weight, l1_bias}
+	// l3, l3_weight, l3_bias := linear(s2, 64)
+	// s3 := sigmoid(l3)
+	// l4, l4_weight, l4_bias := linear(s3, 10)
+	sm := log_softmax(l1, y_node)
+	params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
 
 	return sm, params, x_node, y_node
@@ -878,10 +871,10 @@ func Simple() {
 				}
 			}
 
-			if batch == num_batches-1 {
-				pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
-				pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
-			}
+			// if batch == num_batches-1 {
+			// 	pt(y_node.tensor, "epoch "+strconv.Itoa(epoch)+" target")
+			// 	pt_exp(pred, "epoch "+strconv.Itoa(epoch)+" preds")
+			// }
 		}
 		test_loss := 0.
 		for batch := range test_x {
