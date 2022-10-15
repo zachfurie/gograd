@@ -54,7 +54,7 @@ for epoch := range loss_list {
 	total_loss := 0.
 	for batch := range train_x {
 		x_node.tensor = train_x[batch] // set tensor of input node to next data element
-		y = train_y[batch]
+		y := train_y[batch]
 		pred := forward(out) // call forward on output node
 		nll_loss(pred, y, out.grad) // get loss and pass gradient to output node
 		backward(out) // call backward on output node
