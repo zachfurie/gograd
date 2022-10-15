@@ -699,8 +699,8 @@ func backward(root *node) {
 // ----------------------------------- TESTING (will be removed when done) -----------------------------------
 
 // Example of a Neural Network constructor. Returns output layer node, slice of all parameter leaf nodes, input node, and target node.
-func _simple(l2 int, l int) (*node, []*node, *node) {
-	x_placeholder := zeros(l2, l)
+func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
+	x_placeholder := zeros(dim0, dim1)
 	x_node := leaf(&x_placeholder, false)
 	l1, l1_weight, l1_bias := linear(x_node, 10)
 	// rel1 := relu(l1, x_node.tensor.l2, 5)

@@ -27,8 +27,8 @@ Long Term:
 ## Gograd_2d Example Usage:
 ```go
 // Define Model
-func _simple(l2 int, l int) (*node, []*node, *node) {
-	x_placeholder := zeros(l2, l)
+func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
+	x_placeholder := zeros(dim0, dim1)
 	x_node := leaf(x_placeholder, false)
 	l1, l1_weight, l1_bias := linear(x_node, 128) 
 	s1 := sigmoid(l1)
