@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	d := 3
+	d := 2
 	numCPUs := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPUs)
 	fmt.Println("using ", runtime.GOMAXPROCS(numCPUs), " cores")
@@ -21,7 +21,14 @@ func main() {
 	if d == 2 {
 		fmt.Println("2d")
 		gograd_2d.Simple()
+	} else if d == 3 {
+		fmt.Println("Nd")
+		gograd_nd.Simple()
+		// gograd_nd.Test()
 	} else {
+		fmt.Println("2d")
+		gograd_2d.Simple()
+		fmt.Println("------------------------------------------------------------------------")
 		fmt.Println("Nd")
 		gograd_nd.Simple()
 	}

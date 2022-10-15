@@ -83,7 +83,11 @@ func zeros(shape []int) tensor {
 		if i == len(shape)-1 {
 			di[i] = 1
 		} else {
-			di[i] = shape[i+1]
+			temp := 1
+			for ii := i + 1; ii < len(shape); ii++ {
+				temp *= shape[ii]
+			}
+			di[i] = temp //shape[i+1]
 		}
 	}
 	return tensor{data, shape, di}
@@ -513,7 +517,8 @@ func forward(root *node) *tensor {
 				defer mm_wg.Done()
 				for i := 0; i < a.l2(); i++ {
 					for j := 0; j < root.tensor.l(); j++ {
-						temp := root.tensor.get([]int{k, i}) + (a.get([]int{i, j}) * x.get([]int{k, j}))
+						temp2 := (a.get([]int{i, j}) * x.get([]int{k, j}))
+						temp := root.tensor.get([]int{k, i}) + temp2
 						root.tensor.set([]int{k, i}, temp)
 					}
 				}
@@ -671,8 +676,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	y_node := leaf(y, false)
 
 	// NN:
-	l1, l1_weight, _ := linear(x_node, 10, "relu") //l1_bias
-	// rel1 := relu(l1, x_node.tensor.l2, 5)
+	l1, l1_weight, l1_bias := linear(x_node, 10, "xavier")
 	// s1 := sigmoid(l1)
 	// l2, l2_weight, l2_bias := linear(s1, 10, "xavier")
 	// s2 := sigmoid(l2)
@@ -682,7 +686,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 	// s3 := sigmoid(l3)
 	// l4, l4_weight, l4_bias := linear(s3, 10)
 	sm := log_softmax(l1, y_node)
-	params := []*node{l1_weight} //, l1_bias}
+	params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
@@ -694,9 +698,9 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 // simple neural net
 func Simple() {
 	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
-	batch_size := 64
-	num_epochs := 100
-	lr := 0.001
+	batch_size := 10     //64
+	num_epochs := 10
+	lr := 0.9 //0.99 //0.001
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
 	f, err := os.Open("mnist_train.csv")
@@ -782,7 +786,6 @@ func Simple() {
 	prev_m1s := make([]*tensor, len(params))
 	prev_m2s := make([]*tensor, len(params))
 	best_loss := 999999999.
-	// prev_loss := 999999999.
 	best_epoch := -1
 	best_weights := make([]*tensor, len(params))
 	batch_gradients := make([]*tensor, len(params))
@@ -816,7 +819,9 @@ func Simple() {
 			nll_loss(pred, y_node.tensor, sm.grad)
 			// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
 			backward(sm)
-
+			for i, x := range params {
+				add_same_size(batch_gradients[i], x.grad)
+			}
 			// minibatching
 			if (batch+1)%batch_size == 0 {
 				for i, x := range params {
@@ -827,10 +832,6 @@ func Simple() {
 				adam(params, opt, batch_size)
 				step += 1
 				exp_lr_decay(opt, 0.95, step, num_epochs)
-			} else {
-				for i, x := range params {
-					add_same_size(batch_gradients[i], x.grad)
-				}
 			}
 
 			// if batch == num_batches-1 {
@@ -865,7 +866,7 @@ func Simple() {
 		}
 	}
 	fmt.Println("BEST LOSS: ", best_epoch, " | ", best_loss)
-	fmt.Println("Total training time: ", time.Now().Sub(total_start_time))
+	fmt.Println("Total training time: ", time.Since(total_start_time))
 	for i, pnode := range params {
 		pnode.tensor = best_weights[i]
 	}
@@ -911,6 +912,27 @@ func Simple() {
 }
 
 func Test() {
+	data := []float64{1, 2, 3, 4}
+	dl := []int{2, 2}
+	di := []int{2, 1}
+	a := tensor{data, dl, di}
+	data2 := []float64{1, 2, 3, 4}
+	dl2 := []int{2, 2}
+	di2 := []int{2, 1}
+	b := tensor{data2, dl2, di2}
+	add_same_size(&a, &b)
+	b = *a.copy_tens()
+	a = tensor{data, dl, di}
+	fmt.Println(a.data)
+	fmt.Println(b.data)
+	fmt.Println(data)
+	// an := leaf(&a, false)
+	// bn := leaf(&b, false)
+	// mam := matmul(an, bn)
+	// fmt.Println(forward(mam).data)
+}
+
+func TransposeTest() {
 	data := []float64{1, 2, 3, 4}
 	dl := []int{4, 2}
 	di := []int{2, 1}

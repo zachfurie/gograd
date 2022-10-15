@@ -726,7 +726,7 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 // simple neural net
 func Simple() {
 	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
-	batch_size := 64
+	batch_size := 10
 	num_epochs := 10
 	lr := 0.001
 
@@ -854,7 +854,9 @@ func Simple() {
 			nll_loss(pred, y_node.tensor, sm.grad)
 			// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
 			backward(sm)
-
+			for i, x := range params {
+				batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
+			}
 			// minibatching
 			if (batch+1)%batch_size == 0 {
 				for i, x := range params {
@@ -865,10 +867,6 @@ func Simple() {
 				adam(params, opt, batch_size)
 				step += 1
 				exp_lr_decay(opt, 0.95, step, num_epochs)
-			} else {
-				for i, x := range params {
-					batch_gradients[i] = add_same_size(batch_gradients[i], x.grad)
-				}
 			}
 
 			// if batch == num_batches-1 {
