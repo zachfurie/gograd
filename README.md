@@ -29,7 +29,7 @@ Long Term:
 // Define Model
 func _simple(l2 int, l int) (*node, []*node, *node) {
 	x_placeholder := zeros(l2, l)
-	x_node := leaf(x, false)
+	x_node := leaf(x_placeholder, false)
 	l1, l1_weight, l1_bias := linear(x_node, 128) 
 	s1 := sigmoid(l1)
 	l2, l2_weight, l2_bias := linear(s1, 64) 
