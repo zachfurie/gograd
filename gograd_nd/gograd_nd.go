@@ -516,7 +516,7 @@ func forward(root *node) *tensor {
 			go func(k int) {
 				defer mm_wg.Done()
 				for i := 0; i < a.l2(); i++ {
-					for j := 0; j < root.tensor.l(); j++ {
+					for j := 0; j < a.l(); j++ {
 						temp2 := (a.get([]int{i, j}) * x.get([]int{k, j}))
 						temp := root.tensor.get([]int{k, i}) + temp2
 						root.tensor.set([]int{k, i}, temp)
@@ -698,9 +698,9 @@ func _simple(x *tensor, y *tensor) (*node, []*node, *node, *node) {
 // simple neural net
 func Simple() {
 	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
-	batch_size := 10     //64
+	batch_size := 64     //64
 	num_epochs := 10
-	lr := 0.9 //0.99 //0.001
+	lr := 0.001 //0.9 //0.99 //0.001
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
 	f, err := os.Open("mnist_train.csv")

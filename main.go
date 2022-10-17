@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	d := 2
+	d := 3
 	numCPUs := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPUs)
 	fmt.Println("using ", runtime.GOMAXPROCS(numCPUs), " cores")
@@ -25,6 +25,7 @@ func main() {
 		fmt.Println("Nd")
 		gograd_nd.Simple()
 		// gograd_nd.Test()
+		// gograd_nd.TransposeTest()
 	} else {
 		fmt.Println("2d")
 		gograd_2d.Simple()

@@ -513,7 +513,7 @@ func forward(root *node) *tensor {
 				defer mm_wg.Done()
 				for i := 0; i < a.l2; i++ {
 					a_layer := *a.data[i]
-					for j := 0; j < root.l; j++ {
+					for j := 0; j < a.l; j++ {
 						data_layer[i] += a_layer[j] * x_layer[j]
 					}
 				}
@@ -702,19 +702,19 @@ func backward(root *node) {
 func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 	x_placeholder := zeros(dim0, dim1)
 	x_node := leaf(&x_placeholder, false)
-	l1, l1_weight, l1_bias := linear(x_node, 10)
+	l1, l1_weight, l1_bias := linear(x_node, 100)
 	// rel1 := relu(l1, x_node.tensor.l2, 5)
-	// s1 := sigmoid(l1)
-	// l2, l2_weight, l2_bias := linear(s1, 10)
+	s1 := sigmoid(l1)
+	l2, l2_weight, l2_bias := linear(s1, 10)
 	// s2 := sigmoid(l2)
 	// l25, l25_weight, l25_bias := linear(s2, 64)
 	// s25 := sigmoid(l25)
 	// l3, l3_weight, l3_bias := linear(s2, 64)
 	// s3 := sigmoid(l3)
 	// l4, l4_weight, l4_bias := linear(s3, 10)
-	sm := log_softmax(l1)
-	params := []*node{l1_weight, l1_bias}
-	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
+	sm := log_softmax(l2)
+	// params := []*node{l1_weight, l1_bias}
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
@@ -724,7 +724,7 @@ func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 
 // simple neural net
 func Simple() {
-	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
+	num_batches := 5120 // 51200 // not number of batches, actually just number of samples
 	batch_size := 10
 	num_epochs := 10
 	lr := 0.001

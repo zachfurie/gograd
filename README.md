@@ -1,12 +1,14 @@
 
 # Autograd in Golang
 
+This project is meant for me to learn more about deep learning. Not neccessarily better than any existing libraries in any way. Suggestions are appreciated!
+
 Results:
 * Gograd_2d: 
   * Achieved 98.2% correct predictions on MNIST with an hour of training. Not amazing, but shows that the library works. 
 
 * Gograd_nd: 
-  * Achieved 100% correct predictions on MNIST with 00:01:24 of training. Further exploration required.
+  * Achieved 100% correct predictions on MNIST with 00:01:01 of training. Further exploration required.
   * Achieved 95% on fashion-mnist with same model/params
 
 To Do:
