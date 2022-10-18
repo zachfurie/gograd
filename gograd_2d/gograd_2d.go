@@ -764,10 +764,10 @@ func Simple() {
 		y := zeros(1, 10)
 		for i := range x.data {
 			x_layer := *x.data[i]
-			y_layer := *y.data[0]
+			y_layer := *y.data[i]
 			y_val, _ := strconv.Atoi(data[data_index][0])
 			y_layer[y_val] = 1.
-			for j := range x_layer {
+			for j := 1; j < len(x_layer); j++ {
 				x_val, _ := strconv.Atoi(data[data_index][j])
 				x_layer[j] = float64(x_val) / 255.
 			}
@@ -784,7 +784,7 @@ func Simple() {
 			y_layer := *y.data[i]
 			y_value, _ := strconv.Atoi(data[data_index][0])
 			y_layer[y_value] = 1.
-			for j := range x_layer {
+			for j := 1; j < len(x_layer); j++ {
 				x_value, _ := strconv.Atoi(data[data_index][j])
 				x_layer[j] = float64(x_value) / 255.
 			}
@@ -802,7 +802,7 @@ func Simple() {
 			y_layer := *y.data[i]
 			y_value, _ := strconv.Atoi(datav[data_index_v][0])
 			y_layer[y_value] = 1.
-			for j := range x_layer {
+			for j := 1; j < len(x_layer); j++ {
 				x_value, _ := strconv.Atoi(datav[data_index_v][j])
 				x_layer[j] = float64(x_value) / 255.
 			}
