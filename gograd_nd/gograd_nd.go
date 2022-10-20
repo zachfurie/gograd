@@ -422,8 +422,8 @@ func adam(weights []*node, init adam_init, bsz int) {
 }
 
 // Exponential learning rate decay
-func exp_lr_decay(init adam_init, decay_rate float64, global_step int, decay_steps int) {
-	init.alpha = init.alpha * math.Pow(decay_rate, float64(global_step/decay_steps))
+func exp_lr_decay(init adam_init, initial_lr float64, decay_rate float64, global_step int, decay_steps int) {
+	init.alpha = initial_lr * math.Pow(decay_rate, float64(global_step/decay_steps))
 }
 
 // LR SCHEDULER
@@ -676,21 +676,21 @@ func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 	x_node := leaf(&x_placeholder, false)
 
 	// NN:
-	l1, l1_weight, l1_bias := linear(x_node, 128, "xavier")
-	s1 := sigmoid(l1)
-	d1 := dropout(s1, 0.1)
-	l2, l2_weight, l2_bias := linear(d1, 64, "xavier")
-	s2 := sigmoid(l2)
+	l1, l1_weight, l1_bias := linear(x_node, 10, "xavier")
+	// s1 := sigmoid(l1)
+	// d1 := dropout(s1, 0.1)
+	// l2, l2_weight, l2_bias := linear(d1, 64, "xavier")
+	// s2 := sigmoid(l2)
 	// l25, l25_weight, l25_bias := linear(s2, 128)
 	// s25 := sigmoid(l25)
 	// d2 := dropout(s2, 0.1)
-	l3, l3_weight, l3_bias := linear(s2, 10, "xavier")
+	// l3, l3_weight, l3_bias := linear(s2, 10, "xavier")
 	// s3 := sigmoid(l3)
 	// l4, l4_weight, l4_bias := linear(s3, 10, "xavier")
-	sm := log_softmax(l3)
-	// params := []*node{l1_weight, l1_bias}
+	sm := log_softmax(l1)
+	params := []*node{l1_weight, l1_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
-	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
+	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
 
@@ -699,13 +699,13 @@ func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 
 // simple neural net
 func Simple() {
-	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
-	batch_size := 32     //64
-	num_epochs := 30
-	lr := 0.005 //0.9 //0.99 //0.001
+	num_batches := 5120 // 51200 // not number of batches, actually just number of samples
+	batch_size := 1     //64
+	num_epochs := 10
+	lr := 0.001 //0.9 //0.99 //0.001
 
 	// Read Data - https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
-	f, err := os.Open("fashion-mnist_train.csv")
+	f, err := os.Open("mnist_train.csv") //fashion-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -715,7 +715,7 @@ func Simple() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fv, err := os.Open("fashion-mnist_test.csv")
+	fv, err := os.Open("mnist_test.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -830,7 +830,7 @@ func Simple() {
 				}
 				adam(params, opt, batch_size)
 				step += 1
-				exp_lr_decay(opt, 0.95, step, num_epochs)
+				exp_lr_decay(opt, lr, 0.95, step, num_epochs*batch_size)
 			}
 
 			// if batch == num_batches-1 {
