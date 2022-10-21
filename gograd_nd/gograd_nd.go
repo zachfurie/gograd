@@ -677,9 +677,9 @@ func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 
 	// NN:
 	l1, l1_weight, l1_bias := linear(x_node, 10, "xavier")
-	// s1 := sigmoid(l1)
+	s1 := sigmoid(l1)
 	// d1 := dropout(s1, 0.1)
-	// l2, l2_weight, l2_bias := linear(d1, 64, "xavier")
+	l2, l2_weight, l2_bias := linear(s1, 10, "xavier")
 	// s2 := sigmoid(l2)
 	// l25, l25_weight, l25_bias := linear(s2, 128)
 	// s25 := sigmoid(l25)
@@ -687,9 +687,9 @@ func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 	// l3, l3_weight, l3_bias := linear(s2, 10, "xavier")
 	// s3 := sigmoid(l3)
 	// l4, l4_weight, l4_bias := linear(s3, 10, "xavier")
-	sm := log_softmax(l1)
-	params := []*node{l1_weight, l1_bias}
-	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
+	sm := log_softmax(l2)
+	// params := []*node{l1_weight, l1_bias}
+	params := []*node{l1_weight, l1_bias, l2_weight, l2_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias}
 	// params := []*node{l1_weight, l1_bias, l2_weight, l2_bias, l3_weight, l3_bias, l4_weight, l4_bias, l25_weight, l25_bias}
@@ -809,15 +809,22 @@ func Simple() {
 			train_y[i], train_y[j] = train_y[j], train_y[i]
 		})
 		start_time := time.Now()
+		for_tot := 0
+		bac_tot := 0
+		step_tot := 0
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y := train_y[batch]
+			for_time := time.Now()
 			pred := forward(sm)
+			for_tot += int(time.Since(for_time).Milliseconds())
 			zero_grad := zeros(sm.grad.shape)
 			sm.grad = &zero_grad
 			nll_loss(pred, y, sm.grad)
 			// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
+			bac_time := time.Now()
 			backward(sm)
+			bac_tot += int(time.Since(bac_time).Milliseconds())
 			for i, x := range params {
 				add_same_size(batch_gradients[i], x.grad)
 			}
@@ -828,7 +835,9 @@ func Simple() {
 					bg := zeros(x.grad.shape)
 					batch_gradients[i] = &bg
 				}
+				step_time := time.Now()
 				adam(params, opt, batch_size)
+				step_tot += int(time.Since(step_time).Milliseconds())
 				step += 1
 				exp_lr_decay(opt, lr, 0.95, step, num_epochs*batch_size)
 			}
@@ -863,6 +872,9 @@ func Simple() {
 				best_weights[i] = pnode.tensor.copy_tens()
 			}
 		}
+		fmt.Println("forward time: ", for_tot)
+		fmt.Println("backward time: ", bac_tot)
+		fmt.Println("step time: ", step_tot)
 	}
 	fmt.Println("BEST LOSS: ", best_epoch, " | ", best_loss)
 	fmt.Println("Total training time: ", time.Since(total_start_time))
@@ -951,4 +963,14 @@ func TransposeTest() {
 	gg = []int{1, 1}
 	fmt.Println(a.get(g), a.get(gg))
 
+}
+
+func Get_test() {
+	a := ones([]int{10, 10})
+	t := time.Now()
+	for i := 0; i < 10000000; i++ {
+		b := a.get([]int{8, 8})
+		a.set([]int{0, 0}, b)
+	}
+	fmt.Println(int(time.Since(t).Milliseconds()), " milliseconds")
 }
