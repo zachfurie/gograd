@@ -22,9 +22,9 @@ func main() {
 		fmt.Println("2d")
 		gograd_2d.Simple()
 	} else if d == 3 {
-		gograd_nd.Get_test()
-		// fmt.Println("Nd")
-		// gograd_nd.Simple()
+		// gograd_nd.Get_test()
+		fmt.Println("Nd")
+		gograd_nd.Simple()
 	} else {
 		fmt.Println("2d")
 		gograd_2d.Simple()

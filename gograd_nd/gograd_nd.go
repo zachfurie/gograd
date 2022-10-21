@@ -699,8 +699,8 @@ func _simple(dim0 int, dim1 int) (*node, []*node, *node) {
 
 // simple neural net
 func Simple() {
-	num_batches := 5120 // 51200 // not number of batches, actually just number of samples
-	batch_size := 1     //64
+	num_batches := 51200 // 51200 // not number of batches, actually just number of samples
+	batch_size := 1      //64
 	num_epochs := 10
 	lr := 0.001 //0.9 //0.99 //0.001
 
@@ -788,7 +788,6 @@ func Simple() {
 	best_epoch := -1
 	best_weights := make([]*tensor, len(params))
 	batch_gradients := make([]*tensor, len(params))
-	step := 0
 	for i, x := range params {
 		prev1 := zeros(x.grad.shape)
 		prev2 := zeros(x.grad.shape)
@@ -809,22 +808,14 @@ func Simple() {
 			train_y[i], train_y[j] = train_y[j], train_y[i]
 		})
 		start_time := time.Now()
-		for_tot := 0
-		bac_tot := 0
-		step_tot := 0
 		for batch := range train_x {
 			x_node.tensor = train_x[batch]
 			y := train_y[batch]
-			for_time := time.Now()
 			pred := forward(sm)
-			for_tot += int(time.Since(for_time).Milliseconds())
 			zero_grad := zeros(sm.grad.shape)
 			sm.grad = &zero_grad
 			nll_loss(pred, y, sm.grad)
-			// loss := least_squares_loss(pred, y_node.tensor, sm.grad)
-			bac_time := time.Now()
 			backward(sm)
-			bac_tot += int(time.Since(bac_time).Milliseconds())
 			for i, x := range params {
 				add_same_size(batch_gradients[i], x.grad)
 			}
@@ -835,11 +826,8 @@ func Simple() {
 					bg := zeros(x.grad.shape)
 					batch_gradients[i] = &bg
 				}
-				step_time := time.Now()
 				adam(params, opt, batch_size)
-				step_tot += int(time.Since(step_time).Milliseconds())
-				step += 1
-				exp_lr_decay(opt, lr, 0.95, step, num_epochs*batch_size)
+				exp_lr_decay(opt, lr, 0.95, int(opt.t), num_epochs*batch_size)
 			}
 
 			// if batch == num_batches-1 {
@@ -872,9 +860,6 @@ func Simple() {
 				best_weights[i] = pnode.tensor.copy_tens()
 			}
 		}
-		fmt.Println("forward time: ", for_tot)
-		fmt.Println("backward time: ", bac_tot)
-		fmt.Println("step time: ", step_tot)
 	}
 	fmt.Println("BEST LOSS: ", best_epoch, " | ", best_loss)
 	fmt.Println("Total training time: ", time.Since(total_start_time))
